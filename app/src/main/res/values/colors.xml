@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主题色 -->
+    <color name="primary">#1565C0</color>
+    <color name="primary_dark">#0D47A1</color>
+    <color name="accent">#42A5F5</color>
+    <color name="background">#FAFAFA</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="on_background">#212121</color>
+    <color name="on_surface">#424242</color>
+
+    <!-- 说话人颜色（5种足够覆盖大多数会议） -->
+    <color name="speaker_1">#1565C0</color>  <!-- 蓝 -->
+    <color name="speaker_2">#E65100</color>  <!-- 橙 -->
+    <color name="speaker_3">#2E7D32</color>  <!-- 绿 -->
+    <color name="speaker_4">#6A1B9A</color>  <!-- 紫 -->
+    <color name="speaker_5">#C62828</color>  <!-- 红 -->
+    <color name="speaker_6">#00695C</color>  <!-- 青 -->
+    <color name="speaker_7">#F9A825</color>  <!-- 金 -->
+    <color name="speaker_8">#4E342E</color>  <!-- 棕 -->
+
+    <!-- 功能色 -->
+    <color name="interim_text">#9E9E9E</color>
+    <color name="status_recording">#4CAF50</color>
+    <color name="status_paused">#FFC107</color>
+    <color name="error_red">#D32F2F</color>
+    <color name="divider">#E0E0E0</color>
+</resources>

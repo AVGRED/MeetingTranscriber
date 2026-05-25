@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:paddingVertical="6dp"
+    android:paddingHorizontal="4dp"
+    android:gravity="start">
+
+    <!-- 说话人标签 -->
+    <TextView
+        android:id="@+id/tv_speaker"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:minWidth="56dp"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:lineSpacingExtra="4dp"
+        tools:text="会议人1"
+        tools:textColor="@color/speaker_1" />
+
+    <!-- 时间和文本容器 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <!-- 时间戳 -->
+        <TextView
+            android:id="@+id/tv_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:textColor="@color/interim_text"
+            android:layout_marginBottom="2dp"
+            tools:text="00:15" />
+
+        <!-- 转写文本 -->
+        <TextView
+            android:id="@+id/tv_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textColor="@color/on_background"
+            android:lineSpacingExtra="6dp"
+            tools:text="大家好，今天我们讨论一下Q2的产品规划。" />
+
+    </LinearLayout>
+
+</LinearLayout>
