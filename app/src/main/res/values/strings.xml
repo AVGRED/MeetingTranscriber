@@ -20,4 +20,9 @@
     <string name="permission_audio_required">需要录音权限</string>
     <string name="permission_audio_rationale">会议转写需要获取麦克风权限来采集音频</string>
     <string name="speaker_label">会议人%1$d</string>
+    <string name="language_label">语种</string>
+    <string name="settings">设置</string>
+    <string name="vocabulary_management">词库管理</string>
+    <string name="new_vocabulary">新建词库</string>
+    <string name="import_vocabulary">导入词库</string>
 </resources>

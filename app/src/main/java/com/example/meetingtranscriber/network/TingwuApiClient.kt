@@ -8,6 +8,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.*
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,6 +31,12 @@ class TingwuApiClient {
         private const val API_BASE = "https://$API_HOST/openapi/tingwu/v2"
 
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+
+        private fun rfc1123Date(): String {
+            val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
+            sdf.timeZone = TimeZone.getTimeZone("GMT")
+            return sdf.format(Date())
+        }
     }
 
     private val client = OkHttpClient.Builder()
@@ -44,42 +52,52 @@ class TingwuApiClient {
      */
     suspend fun createRealtimeTask(
         appKey: String = BuildConfig.ALIYUN_TINGWU_APP_KEY,
-        accessToken: String
+        accessKeyId: String = BuildConfig.ALIYUN_ACCESS_KEY_ID,
+        accessKeySecret: String = BuildConfig.ALIYUN_ACCESS_KEY_SECRET,
+        sourceLanguage: String = "cn",
+        vocabularyId: String? = null
     ): CreateTaskResult? = withContext(Dispatchers.IO) {
         try {
             val bodyJson = JSONObject().apply {
                 put("AppKey", appKey)
-                put("Type", "realtime")
+                put("Operation", "start")
 
                 put("Input", JSONObject().apply {
-                    put("SourceLanguage", "cn")
+                    put("SourceLanguage", sourceLanguage)
                     put("Format", "pcm")
                     put("SampleRate", 16000)
                     put("TaskKey", "meeting-${System.currentTimeMillis()}")
                 })
 
                 put("Parameters", JSONObject().apply {
-                    // 转写参数
                     put("Transcription", JSONObject().apply {
-                        put("OutputLevel", 2)            // 词级别
-
-                        // 说话人分离
+                        put("OutputLevel", 2)
                         put("DiarizationEnabled", true)
                         put("Diarization", JSONObject().apply {
-                            put("SpeakerCount", 0)        // 0 = 自动检测
+                            put("SpeakerCount", 0)
                         })
+                        if (!vocabularyId.isNullOrBlank()) {
+                            put("VocabularyId", vocabularyId)
+                        }
                     })
-
-                    // 自动章节（可选）
                     put("AutoChaptersEnabled", false)
                 })
             }
 
+            val query = "type=realtime"
+            val path = "/openapi/tingwu/v2/tasks"
+            val date = rfc1123Date()
+            val bodyStr = bodyJson.toString()
+            val signature = AliyunSigner.sign(accessKeyId, accessKeySecret, "PUT", path, query, bodyStr, date)
+
             val request = Request.Builder()
-                .url("$API_BASE/tasks")
-                .header("Authorization", "Bearer $accessToken")
+                .url("$API_BASE/tasks?$query")
+                .header("Authorization", signature)
+                .header("Accept", "application/json")
                 .header("Content-Type", "application/json")
-                .post(bodyJson.toString().toRequestBody(JSON_MEDIA))
+                .header("Date", date)
+                .header("Host", API_HOST)
+                .put(bodyStr.toRequestBody(JSON_MEDIA))
                 .build()
 
             val response = client.newCall(request).execute()
@@ -114,14 +132,27 @@ class TingwuApiClient {
      */
     suspend fun stopTask(
         taskId: String,
-        accessToken: String
+        accessKeyId: String = BuildConfig.ALIYUN_ACCESS_KEY_ID,
+        accessKeySecret: String = BuildConfig.ALIYUN_ACCESS_KEY_SECRET
     ): Boolean = withContext(Dispatchers.IO) {
         try {
+            val bodyJson = JSONObject().apply {
+                put("TaskId", taskId)
+                put("Operation", "stop")
+            }
+            val path = "/openapi/tingwu/v2/tasks"
+            val date = rfc1123Date()
+            val bodyStr = bodyJson.toString()
+            val signature = AliyunSigner.sign(accessKeyId, accessKeySecret, "PUT", path, "", bodyStr, date)
+
             val request = Request.Builder()
-                .url("$API_BASE/tasks/$taskId/stop")
-                .header("Authorization", "Bearer $accessToken")
+                .url("$API_BASE/tasks")
+                .header("Authorization", signature)
+                .header("Accept", "application/json")
                 .header("Content-Type", "application/json")
-                .post("{}".toRequestBody(JSON_MEDIA))
+                .header("Date", date)
+                .header("Host", API_HOST)
+                .put(bodyStr.toRequestBody(JSON_MEDIA))
                 .build()
 
             val response = client.newCall(request).execute()
@@ -137,12 +168,20 @@ class TingwuApiClient {
      */
     suspend fun getTaskResult(
         taskId: String,
-        accessToken: String
+        accessKeyId: String = BuildConfig.ALIYUN_ACCESS_KEY_ID,
+        accessKeySecret: String = BuildConfig.ALIYUN_ACCESS_KEY_SECRET
     ): String? = withContext(Dispatchers.IO) {
         try {
+            val path = "/openapi/tingwu/v2/tasks/$taskId/transcription"
+            val date = rfc1123Date()
+            val signature = AliyunSigner.sign(accessKeyId, accessKeySecret, "GET", path, "", "", date)
+
             val request = Request.Builder()
                 .url("$API_BASE/tasks/$taskId/transcription")
-                .header("Authorization", "Bearer $accessToken")
+                .header("Authorization", signature)
+                .header("Accept", "application/json")
+                .header("Date", date)
+                .header("Host", API_HOST)
                 .get()
                 .build()
 
