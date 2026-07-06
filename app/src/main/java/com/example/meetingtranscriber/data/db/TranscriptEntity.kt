@@ -26,5 +26,6 @@ data class TranscriptEntity(
     val endTimeMs: Long,
     val sentenceId: Long = 0,
     val isInterim: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val topicId: Int = 0
 )

@@ -39,6 +39,16 @@
             android:fontFamily="monospace"
             tools:text="00:23:15" />
 
+        <!-- 离线录音按钮（未开会时显示） -->
+        <Button
+            android:id="@+id/btn_offline"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="离线"
+            android:textColor="#FF9800"
+            android:visibility="visible" />
+
         <!-- 演示按钮（未开会时显示） -->
         <Button
             android:id="@+id/btn_demo"
@@ -72,6 +82,56 @@
 
     </LinearLayout>
 
+    <!-- 会议标题输入（未开会时显示） -->
+    <LinearLayout
+        android:id="@+id/layout_title_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="4dp"
+        android:background="@color/surface"
+        app:layout_constraintTop_toBottomOf="@id/toolbar">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="会议标题"
+            android:textSize="14sp"
+            android:textColor="@color/on_surface"
+            android:layout_marginEnd="8dp" />
+
+        <EditText
+            android:id="@+id/et_meeting_title"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/search_bg"
+            android:paddingHorizontal="10dp"
+            android:singleLine="true"
+            android:textSize="14sp"
+            android:hint="输入会议标题..."
+            android:maxLength="50" />
+
+        <Spinner
+            android:id="@+id/spinner_language"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:spinnerMode="dropdown"
+            android:dropDownVerticalOffset="48dp" />
+
+        <Spinner
+            android:id="@+id/spinner_tag"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:spinnerMode="dropdown"
+            android:dropDownVerticalOffset="48dp" />
+    </LinearLayout>
+
     <!-- 演示模式提示条 -->
     <TextView
         android:id="@+id/tv_demo_badge"
@@ -83,8 +143,57 @@
         android:gravity="center"
         android:background="#FF9800"
         android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/toolbar"
+        app:layout_constraintTop_toBottomOf="@id/layout_title_input"
         tools:visibility="visible" />
+
+    <!-- 连接状态提示条（重连/失败时显示） -->
+    <LinearLayout
+        android:id="@+id/layout_connection_banner"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:background="#FF9800"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tv_demo_badge"
+        tools:visibility="visible">
+
+        <TextView
+            android:id="@+id/tv_connection_status"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="重新连接中..."
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:gravity="center" />
+
+        <Button
+            android:id="@+id/btn_retry"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:text="重试"
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:visibility="gone"
+            tools:visibility="visible" />
+    </LinearLayout>
+
+    <!-- 错误信息条 -->
+    <TextView
+        android:id="@+id/tv_error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="10dp"
+        android:textSize="13sp"
+        android:textColor="#FFFFFF"
+        android:background="#D32F2F"
+        android:visibility="gone"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        app:layout_constraintTop_toBottomOf="@id/layout_connection_banner"
+        tools:text="鉴权失败，请检查 AccessKey 配置。" />
 
     <!-- 转写列表 -->
     <androidx.recyclerview.widget.RecyclerView
@@ -93,7 +202,7 @@
         android:layout_height="0dp"
         android:padding="12dp"
         android:clipToPadding="false"
-        app:layout_constraintTop_toBottomOf="@id/tv_demo_badge"
+        app:layout_constraintTop_toBottomOf="@id/tv_error"
         app:layout_constraintBottom_toBottomOf="parent"
         tools:listitem="@layout/item_transcript_segment" />
 

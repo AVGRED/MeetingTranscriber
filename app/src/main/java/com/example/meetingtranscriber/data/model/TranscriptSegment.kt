@@ -13,7 +13,8 @@ data class TranscriptSegment(
     val endTimeMs: Long,                 // 这句话结束时间
     val sentenceId: Long = 0,            // 云端句子 ID
     val isInterim: Boolean = false,      // 是否为中间结果
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val topicId: Int = 0                // 话题编号，0 表示未分段
 ) {
     /** 格式化的时间戳 */
     val formattedTime: String

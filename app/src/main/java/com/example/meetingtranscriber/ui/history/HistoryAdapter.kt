@@ -1,6 +1,7 @@
 package com.example.meetingtranscriber.ui.history
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
@@ -12,7 +13,9 @@ import com.example.meetingtranscriber.databinding.ItemMeetingHistoryBinding
 
 class HistoryAdapter(
     private val onItemClick: (MeetingInfo) -> Unit,
-    private val onDeleteClick: (MeetingInfo) -> Unit
+    private val onDeleteClick: (MeetingInfo) -> Unit,
+    private val onRestoreClick: ((MeetingInfo) -> Unit)? = null,
+    private val onUploadClick: ((MeetingInfo) -> Unit)? = null
 ) : ListAdapter<MeetingInfo, HistoryAdapter.ViewHolder>(DiffCallback) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -35,7 +38,13 @@ class HistoryAdapter(
             binding.tvDuration.text = meeting.formattedDuration
             binding.tvSpeakers.text = "${meeting.speakerCount} 位说话人 · ${meeting.segmentCount} 条记录"
 
-            // 进行中的会议显示绿点
+            if (!meeting.tag.isNullOrBlank()) {
+                binding.tvTag.visibility = View.VISIBLE
+                binding.tvTag.text = meeting.tag
+            } else {
+                binding.tvTag.visibility = View.GONE
+            }
+
             if (meeting.isOngoing) {
                 binding.ivStatus.background?.setTint(
                     ContextCompat.getColor(binding.root.context, R.color.status_recording)
@@ -47,13 +56,33 @@ class HistoryAdapter(
             }
 
             binding.root.setOnClickListener { onItemClick(meeting) }
-            binding.btnDelete.setOnClickListener { onDeleteClick(meeting) }
+
+            if (meeting.isArchived) {
+                binding.btnDelete.contentDescription = "永久删除"
+                binding.btnDelete.setOnClickListener { onDeleteClick(meeting) }
+                binding.btnRestore.visibility = View.VISIBLE
+                binding.btnRestore.setOnClickListener { onRestoreClick?.invoke(meeting) }
+                binding.btnUpload.visibility = View.GONE
+            } else {
+                binding.btnDelete.contentDescription = "删除"
+                binding.btnDelete.setOnClickListener { onDeleteClick(meeting) }
+                binding.btnRestore.visibility = View.GONE
+
+                if (meeting.isOffline && meeting.endTime != null) {
+                    binding.btnUpload.visibility = View.VISIBLE
+                    binding.btnUpload.setOnClickListener { onUploadClick?.invoke(meeting) }
+                } else {
+                    binding.btnUpload.visibility = View.GONE
+                }
+            }
         }
     }
 
     object DiffCallback : DiffUtil.ItemCallback<MeetingInfo>() {
         override fun areItemsTheSame(old: MeetingInfo, new: MeetingInfo) = old.id == new.id
         override fun areContentsTheSame(old: MeetingInfo, new: MeetingInfo) =
-            old.title == new.title && old.endTime == new.endTime && old.segmentCount == new.segmentCount
+            old.title == new.title && old.endTime == new.endTime &&
+            old.segmentCount == new.segmentCount && old.isArchived == new.isArchived &&
+            old.tag == new.tag
     }
 }

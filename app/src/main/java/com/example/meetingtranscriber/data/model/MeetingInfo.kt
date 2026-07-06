@@ -5,13 +5,18 @@ package com.example.meetingtranscriber.data.model
  */
 data class MeetingInfo(
     val id: Long = 0,
-    val title: String,                      // 会议标题
+    val title: String,
     val startTime: Long = System.currentTimeMillis(),
-    val endTime: Long? = null,              // null = 进行中
+    val endTime: Long? = null,
     val durationSeconds: Int = 0,
-    val speakerCount: Int = 0,             // 说话人数量
-    val segmentCount: Int = 0,             // 转写片段数
-    val summary: String? = null            // 会议纪要
+    val speakerCount: Int = 0,
+    val segmentCount: Int = 0,
+    val summary: String? = null,
+    val isOffline: Boolean = false,
+    val audioFilePath: String? = null,
+    val isArchived: Boolean = false,
+    val archivedAt: Long? = null,
+    val tag: String? = null
 ) {
     val isOngoing: Boolean get() = endTime == null
 

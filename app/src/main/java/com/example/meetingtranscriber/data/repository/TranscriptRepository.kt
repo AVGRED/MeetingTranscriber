@@ -38,6 +38,10 @@ class TranscriptRepository(private val db: AppDatabase) {
         transcriptDao.deleteInterimSegments(meetingId)
     }
 
+    suspend fun renameSpeaker(meetingId: Long, speakerId: String, newName: String): Int {
+        return transcriptDao.updateDisplaySpeaker(meetingId, speakerId, newName)
+    }
+
     private fun TranscriptEntity.toModel() = TranscriptSegment(
         id = id,
         meetingId = meetingId,
@@ -48,7 +52,8 @@ class TranscriptRepository(private val db: AppDatabase) {
         endTimeMs = endTimeMs,
         sentenceId = sentenceId,
         isInterim = isInterim,
-        createdAt = createdAt
+        createdAt = createdAt,
+        topicId = topicId
     )
 
     private fun TranscriptSegment.toEntity() = TranscriptEntity(
@@ -61,6 +66,19 @@ class TranscriptRepository(private val db: AppDatabase) {
         endTimeMs = endTimeMs,
         sentenceId = sentenceId,
         isInterim = isInterim,
-        createdAt = createdAt
+        createdAt = createdAt,
+        topicId = topicId
     )
+
+    suspend fun updateTopicIds(topicMap: Map<Int, List<TranscriptSegment>>) {
+        for ((topicId, segments) in topicMap) {
+            for (seg in segments) {
+                transcriptDao.updateTopicId(seg.id, topicId)
+            }
+        }
+    }
+
+    suspend fun updateText(segmentId: Long, text: String) {
+        transcriptDao.updateText(segmentId, text)
+    }
 }

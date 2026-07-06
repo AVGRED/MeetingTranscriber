@@ -23,6 +23,7 @@
     <!-- 功能色 -->
     <color name="interim_text">#9E9E9E</color>
     <color name="status_recording">#4CAF50</color>
+    <color name="status_connected_silent">#89CFF0</color>
     <color name="status_paused">#FFC107</color>
     <color name="error_red">#D32F2F</color>
     <color name="divider">#E0E0E0</color>

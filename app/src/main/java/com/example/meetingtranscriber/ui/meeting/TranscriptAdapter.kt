@@ -2,6 +2,8 @@ package com.example.meetingtranscriber.ui.meeting
 
 import android.content.Context
 import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.style.BackgroundColorSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,11 +15,19 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.meetingtranscriber.R
 import com.example.meetingtranscriber.data.model.TranscriptSegment
 
-class TranscriptAdapter : ListAdapter<TranscriptSegment, TranscriptAdapter.ViewHolder>(DiffCallback) {
+sealed class AdapterItem {
+    data class TopicHeader(val topicId: Int, val segmentCount: Int) : AdapterItem()
+    data class SegmentItem(val segment: TranscriptSegment) : AdapterItem()
+}
+
+class TranscriptAdapter(
+    private val onSpeakerClick: ((TranscriptSegment) -> Unit)? = null
+) : ListAdapter<AdapterItem, RecyclerView.ViewHolder>(DiffCallback) {
 
     companion object {
         private const val VIEW_TYPE_SEGMENT = 0
         private const val VIEW_TYPE_INTERIM = 1
+        private const val VIEW_TYPE_TOPIC_HEADER = 2
 
         private val SPEAKER_COLORS = intArrayOf(
             R.color.speaker_1,
@@ -32,6 +42,11 @@ class TranscriptAdapter : ListAdapter<TranscriptSegment, TranscriptAdapter.ViewH
     }
 
     private var interimText: String? = null
+    private var searchQuery: String? = null
+
+    fun setSearchQuery(query: String?) {
+        searchQuery = if (query.isNullOrBlank()) null else query.lowercase()
+    }
 
     fun setInterimText(text: String?) {
         val hadInterim = interimText != null
@@ -42,8 +57,29 @@ class TranscriptAdapter : ListAdapter<TranscriptSegment, TranscriptAdapter.ViewH
             !hadInterim && hasInterim -> notifyItemInserted(itemCount)
             hadInterim && !hasInterim -> notifyItemRemoved(itemCount)
             hadInterim && hasInterim -> notifyItemChanged(itemCount - 1)
-            else -> { /* none → none, nothing to do */ }
+            else -> {}
         }
+    }
+
+    fun submitSegments(segments: List<TranscriptSegment>, commitCallback: Runnable? = null) {
+        val items = buildAdapterItems(segments)
+        submitList(items, commitCallback)
+    }
+
+    private fun buildAdapterItems(segments: List<TranscriptSegment>): List<AdapterItem> {
+        if (segments.isEmpty()) return emptyList()
+        val sorted = segments.sortedBy { it.startTimeMs }
+        val result = mutableListOf<AdapterItem>()
+        var currentTopic = -1
+        for (seg in sorted) {
+            if (seg.topicId != 0 && seg.topicId != currentTopic) {
+                currentTopic = seg.topicId
+                val count = sorted.count { it.topicId == currentTopic }
+                result.add(AdapterItem.TopicHeader(currentTopic, count))
+            }
+            result.add(AdapterItem.SegmentItem(seg))
+        }
+        return result
     }
 
     override fun getItemCount(): Int {
@@ -54,31 +90,61 @@ class TranscriptAdapter : ListAdapter<TranscriptSegment, TranscriptAdapter.ViewH
         return if (interimText != null && position == itemCount - 1) {
             VIEW_TYPE_INTERIM
         } else {
-            VIEW_TYPE_SEGMENT
+            val item = getItem(position)
+            when (item) {
+                is AdapterItem.TopicHeader -> VIEW_TYPE_TOPIC_HEADER
+                is AdapterItem.SegmentItem -> VIEW_TYPE_SEGMENT
+            }
         }
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_transcript_segment, parent, false)
-        return ViewHolder(view)
-    }
-
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        if (getItemViewType(position) == VIEW_TYPE_INTERIM) {
-            holder.bindInterim(interimText ?: "", holder.itemView.context)
-        } else {
-            val segment = getItem(position)
-            holder.bind(segment, holder.itemView.context)
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        return when (viewType) {
+            VIEW_TYPE_TOPIC_HEADER -> {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.item_topic_header, parent, false)
+                TopicHeaderViewHolder(view)
+            }
+            else -> {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.item_transcript_segment, parent, false)
+                SegmentViewHolder(view, onSpeakerClick)
+            }
         }
     }
 
-    class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        when (getItemViewType(position)) {
+            VIEW_TYPE_INTERIM -> {
+                (holder as SegmentViewHolder).bindInterim(interimText ?: "", holder.itemView.context)
+            }
+            VIEW_TYPE_TOPIC_HEADER -> {
+                val item = getItem(position) as AdapterItem.TopicHeader
+                (holder as TopicHeaderViewHolder).bind(item)
+            }
+            VIEW_TYPE_SEGMENT -> {
+                val item = getItem(position) as AdapterItem.SegmentItem
+                (holder as SegmentViewHolder).bind(item.segment, holder.itemView.context, searchQuery)
+            }
+        }
+    }
+
+    class TopicHeaderViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val titleText: TextView = itemView.findViewById(R.id.tv_topic_title)
+        private val infoText: TextView = itemView.findViewById(R.id.tv_topic_info)
+
+        fun bind(header: AdapterItem.TopicHeader) {
+            titleText.text = "话题 ${header.topicId}"
+            infoText.text = "${header.segmentCount} 条发言"
+        }
+    }
+
+    class SegmentViewHolder(itemView: View, private val onSpeakerClick: ((TranscriptSegment) -> Unit)?) : RecyclerView.ViewHolder(itemView) {
         private val speakerText: TextView = itemView.findViewById(R.id.tv_speaker)
         private val contentText: TextView = itemView.findViewById(R.id.tv_content)
         private val timeText: TextView = itemView.findViewById(R.id.tv_time)
 
-        fun bind(segment: TranscriptSegment, context: Context) {
+        fun bind(segment: TranscriptSegment, context: Context, highlightQuery: String? = null) {
             speakerText.visibility = View.VISIBLE
             timeText.visibility = View.VISIBLE
 
@@ -88,9 +154,31 @@ class TranscriptAdapter : ListAdapter<TranscriptSegment, TranscriptAdapter.ViewH
             val color = ContextCompat.getColor(context, SPEAKER_COLORS[colorIndex])
             speakerText.setTextColor(color)
 
-            contentText.text = segment.text
-            contentText.setTextColor(ContextCompat.getColor(context, R.color.on_background))
-            contentText.setTypeface(null, Typeface.NORMAL)
+            speakerText.setOnClickListener { onSpeakerClick?.invoke(segment) }
+
+            contentText.apply {
+                if (!highlightQuery.isNullOrBlank()) {
+                    val source = segment.text
+                    val lower = source.lowercase()
+                    val spannable = SpannableString(source)
+                    var start = 0
+                    while (start < lower.length) {
+                        val idx = lower.indexOf(highlightQuery.lowercase(), start)
+                        if (idx == -1) break
+                        spannable.setSpan(
+                            BackgroundColorSpan(0xFFFFEB3B.toInt()),
+                            idx, idx + highlightQuery.length,
+                            SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                        start = idx + highlightQuery.length
+                    }
+                    text = spannable
+                } else {
+                    text = segment.text
+                }
+                setTextColor(ContextCompat.getColor(context, R.color.on_background))
+                setTypeface(null, Typeface.NORMAL)
+            }
 
             timeText.text = segment.formattedTime
         }
@@ -106,12 +194,23 @@ class TranscriptAdapter : ListAdapter<TranscriptSegment, TranscriptAdapter.ViewH
         }
     }
 
-    object DiffCallback : DiffUtil.ItemCallback<TranscriptSegment>() {
-        override fun areItemsTheSame(old: TranscriptSegment, new: TranscriptSegment): Boolean {
-            return old.id == new.id || old.sentenceId == new.sentenceId
+    object DiffCallback : DiffUtil.ItemCallback<AdapterItem>() {
+        override fun areItemsTheSame(old: AdapterItem, new: AdapterItem): Boolean {
+            return when {
+                old is AdapterItem.TopicHeader && new is AdapterItem.TopicHeader -> old.topicId == new.topicId
+                old is AdapterItem.SegmentItem && new is AdapterItem.SegmentItem ->
+                    old.segment.id == new.segment.id || old.segment.sentenceId == new.segment.sentenceId
+                else -> false
+            }
         }
-        override fun areContentsTheSame(old: TranscriptSegment, new: TranscriptSegment): Boolean {
-            return old.text == new.text && old.displaySpeaker == new.displaySpeaker
+        override fun areContentsTheSame(old: AdapterItem, new: AdapterItem): Boolean {
+            return when {
+                old is AdapterItem.TopicHeader && new is AdapterItem.TopicHeader ->
+                    old.topicId == new.topicId && old.segmentCount == new.segmentCount
+                old is AdapterItem.SegmentItem && new is AdapterItem.SegmentItem ->
+                    old.segment.text == new.segment.text && old.segment.displaySpeaker == new.segment.displaySpeaker
+                else -> false
+            }
         }
     }
 }

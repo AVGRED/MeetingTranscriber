@@ -10,6 +10,13 @@ package com.example.meetingtranscriber.util
  */
 object TextFormatter {
 
+    private val DIGITS = mapOf(
+        '零' to 0, '一' to 1, '二' to 2, '三' to 3, '四' to 4,
+        '五' to 5, '六' to 6, '七' to 7, '八' to 8, '九' to 9
+    )
+    private val UNITS = mapOf('十' to 10, '百' to 100, '千' to 1000, '万' to 10000)
+    private val SPOKEN_NUMBER_RE = Regex("[零一二三四五六七八九十百千万]+")
+
     /**
      * 格式化一段转写文本
      */
@@ -40,12 +47,38 @@ object TextFormatter {
     }
 
     /**
-     * 简单的数字口语转数字
-     * "一千二百三十四" → "1234"
-     * MVP 阶段跳过，云端 ASR 已经有 ITN（逆文本正则化）能力
+     * 中文口语数字转阿拉伯数字
+     * "一千二百三十四" → "1234" / "三百零五" → "305"
+     * 仅处理整数，涵盖 0–9999 常用范围
      */
     fun spokenNumberToDigits(text: String): String {
-        // Phase 2 实现
-        return text
+        if (text.isBlank()) return text
+        return SPOKEN_NUMBER_RE.replace(text) { match ->
+            val s = match.value
+            if (s.length == 1) {
+                // 十 → 10, 百/千/万 单独出现保持原样
+                if (s[0] == '十') "10" else DIGITS[s[0]]?.toString() ?: s
+            } else {
+                var result = 0
+                var current = 0
+                for (ch in s) {
+                    when {
+                        ch in DIGITS -> current = DIGITS[ch]!!
+                        ch in UNITS -> {
+                            val unit = UNITS[ch]!!
+                            current = if (current == 0 && unit >= 10) 1 else current
+                            if (unit >= 10000) {
+                                result = (result + current) * unit
+                                current = 0
+                            } else {
+                                result += current * unit
+                                current = 0
+                            }
+                        }
+                    }
+                }
+                (result + current).toString()
+            }
+        }
     }
 }

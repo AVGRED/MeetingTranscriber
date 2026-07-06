@@ -13,5 +13,10 @@ data class MeetingEntity(
     val durationSeconds: Int = 0,
     val speakerCount: Int = 0,
     val segmentCount: Int = 0,
-    val summary: String? = null
+    val summary: String? = null,
+    val isOffline: Boolean = false,
+    val audioFilePath: String? = null,
+    val isArchived: Boolean = false,
+    val archivedAt: Long? = null,
+    val tag: String? = null
 )

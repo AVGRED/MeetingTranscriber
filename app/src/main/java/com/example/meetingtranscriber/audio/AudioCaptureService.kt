@@ -1,11 +1,13 @@
 package com.example.meetingtranscriber.audio
 
+import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.meetingtranscriber.MainActivity
 import com.example.meetingtranscriber.MeetingApplication
@@ -44,6 +46,10 @@ class AudioCaptureService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val isSilent = getSharedPreferences("meeting_prefs", MODE_PRIVATE)
+            .getBoolean("background_silent", false)
+        val priority = if (isSilent) NotificationCompat.PRIORITY_MIN else NotificationCompat.PRIORITY_LOW
+
         val notification = NotificationCompat.Builder(this, MeetingApplication.CHANNEL_MEETING)
             .setContentTitle("会议转写进行中")
             .setContentText("正在实时转写会议内容...")
@@ -51,10 +57,20 @@ class AudioCaptureService : Service() {
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_media_pause, "结束会议", stopIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(priority)
             .build()
 
-        startForeground(FOREGROUND_ID, notification)
+        try {
+            startForeground(FOREGROUND_ID, notification)
+        } catch (e: SecurityException) {
+            Log.e("AudioCaptureService", "缺少前台服务权限: ${e.message}")
+            stopSelf()
+            return START_NOT_STICKY
+        } catch (e: ForegroundServiceStartNotAllowedException) {
+            Log.e("AudioCaptureService", "后台不允许启动前台服务: ${e.message}")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 }

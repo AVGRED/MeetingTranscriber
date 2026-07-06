@@ -35,4 +35,13 @@ interface TranscriptDao {
 
     @Query("DELETE FROM transcript_segments WHERE meetingId = :meetingId")
     suspend fun deleteByMeetingId(meetingId: Long): Int
+
+    @Query("UPDATE transcript_segments SET displaySpeaker = :newName WHERE meetingId = :meetingId AND speakerId = :speakerId")
+    suspend fun updateDisplaySpeaker(meetingId: Long, speakerId: String, newName: String): Int
+
+    @Query("UPDATE transcript_segments SET topicId = :topicId WHERE id = :segmentId")
+    suspend fun updateTopicId(segmentId: Long, topicId: Int)
+
+    @Query("UPDATE transcript_segments SET text = :text WHERE id = :segmentId")
+    suspend fun updateText(segmentId: Long, text: String)
 }

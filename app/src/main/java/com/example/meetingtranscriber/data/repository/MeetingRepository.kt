@@ -21,10 +21,21 @@ class MeetingRepository(private val db: AppDatabase) {
         return meetingDao.getById(id)?.toInfo()
     }
 
-    suspend fun createMeeting(title: String): Long {
+    suspend fun createMeeting(title: String, tag: String? = null): Long {
         val entity = MeetingEntity(
             title = title,
-            startTime = System.currentTimeMillis()
+            startTime = System.currentTimeMillis(),
+            tag = tag
+        )
+        return meetingDao.insert(entity)
+    }
+
+    suspend fun createOfflineMeeting(title: String, startTime: Long, tag: String? = null): Long {
+        val entity = MeetingEntity(
+            title = title,
+            startTime = startTime,
+            isOffline = true,
+            tag = tag
         )
         return meetingDao.insert(entity)
     }
@@ -48,6 +59,34 @@ class MeetingRepository(private val db: AppDatabase) {
         meetingDao.deleteById(meetingId)
     }
 
+    suspend fun updateAudioFilePath(meetingId: Long, path: String) {
+        meetingDao.updateAudioFilePath(meetingId, path)
+    }
+
+    suspend fun archiveMeeting(meetingId: Long) {
+        meetingDao.archiveMeeting(meetingId, System.currentTimeMillis())
+    }
+
+    suspend fun restoreMeeting(meetingId: Long) {
+        meetingDao.restoreMeeting(meetingId)
+    }
+
+    suspend fun permanentDelete(meetingId: Long) {
+        meetingDao.permanentDelete(meetingId)
+    }
+
+    fun getArchivedMeetings(): Flow<List<MeetingInfo>> {
+        return meetingDao.getArchivedMeetings().map { entities ->
+            entities.map { it.toInfo() }
+        }
+    }
+
+    fun getMeetingsByTag(tag: String): Flow<List<MeetingInfo>> {
+        return meetingDao.getMeetingsByTag(tag).map { entities ->
+            entities.map { it.toInfo() }
+        }
+    }
+
     private fun MeetingEntity.toInfo() = MeetingInfo(
         id = id,
         title = title,
@@ -56,6 +95,11 @@ class MeetingRepository(private val db: AppDatabase) {
         durationSeconds = durationSeconds,
         speakerCount = speakerCount,
         segmentCount = segmentCount,
-        summary = summary
+        summary = summary,
+        isOffline = isOffline,
+        audioFilePath = audioFilePath,
+        isArchived = isArchived,
+        archivedAt = archivedAt,
+        tag = tag
     )
 }

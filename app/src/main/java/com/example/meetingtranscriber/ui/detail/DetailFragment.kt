@@ -1,18 +1,22 @@
 package com.example.meetingtranscriber.ui.detail
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.widget.EditText
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.example.meetingtranscriber.R
+import com.example.meetingtranscriber.data.model.TranscriptSegment
 import com.example.meetingtranscriber.databinding.FragmentDetailBinding
+import com.example.meetingtranscriber.ui.export.ExportHelper
 import com.example.meetingtranscriber.ui.meeting.TranscriptAdapter
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class DetailFragment : Fragment() {
@@ -32,6 +36,7 @@ class DetailFragment : Fragment() {
 
     private val viewModel: DetailViewModel by viewModels()
     private lateinit var adapter: TranscriptAdapter
+    private var searchDebounceJob: kotlinx.coroutines.Job? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -49,24 +54,95 @@ class DetailFragment : Fragment() {
             return
         }
 
-        adapter = TranscriptAdapter()
+        adapter = TranscriptAdapter(onSpeakerClick = { segment -> showRenameDialog(segment) })
         binding.rvTranscript.adapter = adapter
         binding.rvTranscript.layoutManager = LinearLayoutManager(requireContext())
 
-        binding.btnExport.setOnClickListener { exportToTxt() }
+        binding.btnBack.setOnClickListener {
+            parentFragmentManager.popBackStack()
+        }
+
+        binding.btnExport.setOnClickListener { showExportDialog() }
+
+        binding.btnFormat.setOnClickListener {
+            if (viewModel.hasFormatBackup()) {
+                AlertDialog.Builder(requireContext())
+                    .setTitle("撤销文本规整")
+                    .setMessage("恢复到规整前的原始文本？")
+                    .setPositiveButton("撤销") { _, _ -> viewModel.undoFormat() }
+                    .setNegativeButton("取消", null)
+                    .show()
+            } else {
+                AlertDialog.Builder(requireContext())
+                    .setTitle("文本规整")
+                    .setMessage("将对所有转写文本应用数字格式化和标点规范化（可撤销）")
+                    .setPositiveButton("执行") { _, _ -> viewModel.formatAllSegments() }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+
+        // 搜索：实时过滤（每次文本变化即搜索）
+        binding.etSearch.addTextChangedListener(
+            object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    searchDebounceJob?.cancel()
+                    searchDebounceJob = viewLifecycleOwner.lifecycleScope.launch {
+                        kotlinx.coroutines.delay(300)
+                        viewModel.search(s?.toString() ?: "")
+                    }
+                }
+                override fun afterTextChanged(s: android.text.Editable?) {}
+            }
+        )
 
         binding.etSearch.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                // Phase 2: 搜索转写内容
+                viewModel.search(binding.etSearch.text?.toString() ?: "")
                 true
             } else {
                 false
             }
         }
 
+        // 纪要编辑
+        binding.btnSaveSummary.setOnClickListener {
+            val text = binding.etSummary.text?.toString() ?: ""
+            viewModel.saveSummary(text)
+            Toast.makeText(requireContext(), "纪要已保存", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnRegenerateSummary.setOnClickListener {
+            if (viewModel.isSummaryEdited.value) {
+                AlertDialog.Builder(requireContext())
+                    .setTitle("撤销修改")
+                    .setMessage("恢复到 AI 生成的原始纪要？")
+                    .setPositiveButton("恢复") { _, _ -> viewModel.restoreOriginal() }
+                    .setNegativeButton("取消", null)
+                    .show()
+            } else {
+                AlertDialog.Builder(requireContext())
+                    .setTitle("重新生成纪要")
+                    .setMessage("当前纪要将被 AI 重新生成的内容覆盖，是否继续？")
+                    .setPositiveButton("覆盖") { _, _ -> viewModel.regenerateSummary() }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+
+        binding.etSummary.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val current = s?.toString() ?: ""
+                val original = viewModel.originalSummary.value
+                viewModel.setSummaryEdited(original != null && current != original)
+            }
+        })
+
         viewModel.loadMeeting(meetingId)
 
-        // 合并两个 collector 到一个协程，避免并发 UI 更新
         viewLifecycleOwner.lifecycleScope.launch {
             launch {
                 viewModel.meeting.collect { meeting ->
@@ -75,63 +151,107 @@ class DetailFragment : Fragment() {
                         binding.tvInfo.text = "${meeting.formattedStartTime} · ${meeting.formattedDuration}"
                         binding.tvSpeakers.text = "${meeting.speakerCount} 位说话人 · ${meeting.segmentCount} 条记录"
                         if (!meeting.summary.isNullOrBlank()) {
-                            binding.tvSummary.visibility = View.VISIBLE
-                            binding.tvSummary.text = meeting.summary
+                            binding.layoutSummary.visibility = View.VISIBLE
+                            if (!viewModel.isSummaryEdited.value) {
+                                binding.etSummary.setText(meeting.summary)
+                            }
                         }
                     }
                 }
             }
-            viewModel.segments.collect { segments ->
-                adapter.submitList(segments)
+            launch {
+                viewModel.isSummaryEdited.collect { edited ->
+                    binding.btnSaveSummary.isEnabled = edited
+                    binding.btnRegenerateSummary.text = if (edited) "撤销修改" else "重新生成"
+                }
+            }
+            // 控制规整按钮
+            launch {
+                viewModel.segments.collect { segs ->
+                    binding.btnFormat.visibility = if (segs.isNotEmpty()) View.VISIBLE else View.GONE
+                    binding.btnFormat.text = if (viewModel.hasFormatBackup()) "撤销规整" else "规整"
+                }
+            }
+            // 根据搜索状态切换数据源
+            launch {
+                combine(viewModel.searchQuery, viewModel.segments, viewModel.searchResults) { query, segments, results ->
+                    Triple(query, segments, results)
+                }.collect { (query, segments, results) ->
+                    adapter.setSearchQuery(query.takeIf { it.isNotBlank() })
+                    if (query.isBlank()) {
+                        adapter.submitSegments(segments)
+                    } else {
+                        adapter.submitSegments(results ?: emptyList())
+                    }
+                }
             }
         }
     }
 
-    private fun exportToTxt() {
+    /** 弹出说话人重命名对话框 */
+    private fun showRenameDialog(segment: TranscriptSegment) {
+        val input = EditText(requireContext())
+        input.setText(segment.displaySpeaker)
+        input.selectAll()
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("重命名说话人")
+            .setMessage("将「${segment.displaySpeaker}」的所有发言重命名为：")
+            .setView(input)
+            .setPositiveButton("确认") { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isNotBlank() && newName != segment.displaySpeaker) {
+                    viewModel.renameSpeaker(segment.speakerId, newName)
+                    Toast.makeText(requireContext(), "已重命名为「$newName」", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showExportDialog() {
         val meeting = viewModel.meeting.value ?: return
-        viewLifecycleOwner.lifecycleScope.launch {
-            val segments = viewModel.segments.value
-            if (segments.isEmpty()) {
-                Toast.makeText(requireContext(), "暂无转写内容", Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
-            val content = buildString {
-                appendLine("=".repeat(50))
-                appendLine(meeting.title)
-                appendLine("时间: ${meeting.formattedStartTime}")
-                appendLine("时长: ${meeting.formattedDuration}")
-                appendLine("说话人数: ${meeting.speakerCount}")
-                appendLine("=".repeat(50))
-                appendLine()
-
-                if (!meeting.summary.isNullOrBlank()) {
-                    appendLine("【会议纪要】")
-                    appendLine(meeting.summary)
-                    appendLine()
-                }
-
-                appendLine("【会议转写】")
-                segments.forEach { segment ->
-                    appendLine("${segment.displaySpeaker} [${segment.formattedTime}]: ${segment.text}")
-                    appendLine()
-                }
-            }
-
-            val fileName = "${meeting.title.replace(Regex("[/\\\\:*?\"<>|]"), "_")}.txt"
-            val dir = requireContext().getExternalFilesDir(null)
-            if (dir == null) {
-                Toast.makeText(requireContext(), "无法访问存储", Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-            val file = java.io.File(dir, fileName)
-            file.writeText(content, Charsets.UTF_8)
-            Toast.makeText(requireContext(), "已导出到: ${file.absolutePath}", Toast.LENGTH_LONG).show()
+        val segments = viewModel.segments.value
+        if (segments.isEmpty()) {
+            Toast.makeText(requireContext(), "暂无转写内容", Toast.LENGTH_SHORT).show()
+            return
         }
+
+        val formats = arrayOf("TXT 文本", "Word 文档", "PDF 文件")
+        val mimeTypes = arrayOf("text/plain", "application/msword", "application/pdf")
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("导出会议记录")
+            .setItems(formats) { _, which ->
+                viewLifecycleOwner.lifecycleScope.launch {
+                    val file = when (which) {
+                        0 -> ExportHelper.exportTxt(requireContext(), meeting, segments)
+                        1 -> ExportHelper.exportWord(requireContext(), meeting, segments)
+                        2 -> ExportHelper.exportPdf(requireContext(), meeting, segments)
+                        else -> null
+                    }
+                    if (file != null) {
+                        AlertDialog.Builder(requireContext())
+                            .setTitle("导出成功")
+                            .setMessage("已保存到:\n${file.absolutePath}")
+                            .setPositiveButton("分享") { _, _ ->
+                                ExportHelper.shareFile(requireContext(), file, mimeTypes[which])
+                            }
+                            .setNegativeButton("关闭", null)
+                            .show()
+                    } else {
+                        Toast.makeText(requireContext(), "导出失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
+        searchDebounceJob?.cancel()
+        searchDebounceJob = null
         _binding = null
     }
 }
