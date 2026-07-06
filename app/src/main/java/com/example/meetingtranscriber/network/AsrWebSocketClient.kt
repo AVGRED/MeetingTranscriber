@@ -1,10 +1,15 @@
 package com.example.meetingtranscriber.network
 
 import android.util.Log
+import com.example.meetingtranscriber.MeetingApplication
 import kotlinx.coroutines.*
 import okhttp3.*
 import okio.ByteString
 import org.json.JSONObject
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 
 /**
@@ -21,6 +26,8 @@ class AsrWebSocketClient {
         private const val TAG = "AsrWebSocketClient"
         private const val MAX_RECONNECT_ATTEMPTS = 5
         private const val RECONNECT_DELAY_MS = 2000L
+        private const val MAX_BUFFER_SIZE = 1200  // 约 120 秒音频
+        private const val AUDIO_FRAME_SIZE = 3200  // 100ms @ 16kHz/16bit/mono
     }
 
     var onInterimResult: ((String) -> Unit)? = null
@@ -28,15 +35,17 @@ class AsrWebSocketClient {
     var onConnectionStateChanged: ((ConnectionState) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
-    enum class ConnectionState {
-        DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING, FAILED
-    }
-
     private var webSocket: WebSocket? = null
     private var taskId: String? = null
     private var reconnectAttempts = 0
     private var shouldReconnect = true
     @Volatile private var connectionState = ConnectionState.DISCONNECTED
+    private val audioBuffer = ConcurrentLinkedQueue<ByteArray>()
+
+    // 溢出文件（内存缓冲满时使用）
+    private var overflowFile: File? = null
+    private var overflowOutputStream: FileOutputStream? = null
+    private var overflowFrameCount: Int = 0
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -69,6 +78,7 @@ class AsrWebSocketClient {
                 Log.i(TAG, "WebSocket 连接成功: ${response.message}")
                 reconnectAttempts = 0
                 updateState(ConnectionState.CONNECTED)
+                flushBuffer()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -101,6 +111,7 @@ class AsrWebSocketClient {
                         doConnect(url)
                     }
                 } else {
+                    audioBuffer.clear()
                     updateState(ConnectionState.FAILED)
                     onError?.invoke("连接失败: ${t.message}")
                 }
@@ -109,12 +120,69 @@ class AsrWebSocketClient {
     }
 
     fun sendAudio(pcmData: ByteArray) {
-        if (connectionState != ConnectionState.CONNECTED) return
-        try {
-            webSocket?.send(ByteString.of(*pcmData))
-        } catch (e: Exception) {
-            Log.w(TAG, "发送音频失败: ${e.message}")
+        if (connectionState == ConnectionState.CONNECTED) {
+            try {
+                webSocket?.send(ByteString.of(*pcmData))
+            } catch (e: Exception) {
+                Log.w(TAG, "发送音频失败: ${e.message}")
+            }
+        } else if (shouldReconnect) {
+            if (audioBuffer.size < MAX_BUFFER_SIZE) {
+                audioBuffer.offer(pcmData.copyOf())
+            } else {
+                writeToOverflowFile(pcmData)
+            }
         }
+    }
+
+    private fun writeToOverflowFile(pcmData: ByteArray) {
+        try {
+            if (overflowFile == null) {
+                val dir = MeetingApplication.instance.cacheDir
+                overflowFile = File(dir, "audio_overflow_${System.currentTimeMillis()}.pcm")
+                overflowOutputStream = FileOutputStream(overflowFile, true)
+            }
+            overflowOutputStream?.write(pcmData)
+            overflowFrameCount++
+        } catch (e: Exception) {
+            Log.w(TAG, "写入溢出文件失败: ${e.message}")
+        }
+    }
+
+    /** 发送缓冲的音频帧（重连后调用） */
+    private fun flushBuffer() {
+        var sent = 0
+        while (audioBuffer.isNotEmpty()) {
+            val frame = audioBuffer.poll() ?: break
+            try {
+                webSocket?.send(ByteString.of(*frame))
+                sent++
+            } catch (e: Exception) {
+                Log.w(TAG, "缓冲帧发送失败: ${e.message}")
+                break
+            }
+        }
+        // 回放溢出文件
+        overflowFile?.let { file ->
+            try {
+                FileInputStream(file).use { fis ->
+                    val buffer = ByteArray(AUDIO_FRAME_SIZE)
+                    while (true) {
+                        val read = fis.read(buffer)
+                        if (read <= 0) break
+                        val frame = if (read == AUDIO_FRAME_SIZE) buffer.copyOf()
+                        else buffer.copyOfRange(0, read)
+                        try { webSocket?.send(ByteString.of(*frame)); sent++ }
+                        catch (e: Exception) { Log.w(TAG, "溢出帧发送失败: ${e.message}"); break }
+                    }
+                }
+                file.delete()
+                overflowFrameCount = 0
+            } catch (e: Exception) { Log.w(TAG, "读取溢出文件失败: ${e.message}") }
+        }
+        overflowFile = null
+        overflowOutputStream = null
+        if (sent > 0) Log.i(TAG, "已重发 $sent 帧缓冲音频")
     }
 
     fun disconnect() {
@@ -124,8 +192,24 @@ class AsrWebSocketClient {
             webSocket?.close(1000, "用户结束会议")
         } catch (_: Exception) {}
         webSocket = null
+        audioBuffer.clear()
+        cleanupOverflowFile()
         updateState(ConnectionState.DISCONNECTED)
     }
+
+    private fun cleanupOverflowFile() {
+        try { overflowOutputStream?.close() } catch (_: Exception) {}
+        overflowOutputStream = null
+        overflowFile?.delete()
+        overflowFile = null
+        overflowFrameCount = 0
+    }
+
+    /** 溢出文件路径（供恢复流程使用） */
+    fun getOverflowFilePath(): String? = overflowFile?.absolutePath
+
+    /** 当前内存缓冲中的帧数 */
+    fun getBufferSize(): Int = audioBuffer.size
 
     private fun parseMessage(jsonStr: String) {
         val json = JSONObject(jsonStr)
@@ -176,12 +260,3 @@ class AsrWebSocketClient {
         onConnectionStateChanged?.invoke(state)
     }
 }
-
-data class AsrSentenceResult(
-    val text: String,
-    val sentenceId: Long,
-    val speakerId: String,
-    val startTimeMs: Long,
-    val endTimeMs: Long,
-    val isFinal: Boolean = true
-)

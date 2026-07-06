@@ -18,3 +18,7 @@
 # Kotlin coroutines
 -keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
 -keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
+
+# SQLCipher
+-keep class net.sqlcipher.** { * }
+-keep class net.sqlcipher.database.** { * }
