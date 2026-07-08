@@ -28,17 +28,23 @@ import kotlinx.coroutines.launch
 
 class MeetingFragment : Fragment() {
 
+    private enum class StartMode {
+        REALTIME,
+        OFFLINE
+    }
+
     private var _binding: FragmentMeetingBinding? = null
     private val binding get() = _binding!!
 
     private val viewModel: MeetingViewModel by viewModels()
     private lateinit var adapter: TranscriptAdapter
+    private var pendingStartMode: StartMode = StartMode.REALTIME
 
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startMeetingWithService()
+            startMeetingWithService(pendingStartMode)
         } else {
             Toast.makeText(requireContext(), "录音权限是必需的", Toast.LENGTH_LONG).show()
         }
@@ -48,7 +54,7 @@ class MeetingFragment : Fragment() {
         ActivityResultContracts.RequestPermission()
     ) { _ ->
         // 无论通知权限是否被授予，都继续启动前台 Service
-        checkAudioPermissionAndStart()
+        checkAudioPermissionAndStart(pendingStartMode)
     }
 
     override fun onCreateView(
@@ -111,7 +117,7 @@ class MeetingFragment : Fragment() {
 
         // 离线录音按钮
         binding.btnOffline.setOnClickListener {
-            viewModel.startOfflineMeeting(binding.etMeetingTitle.text.toString().trim(), getSelectedLanguage(), getSelectedTag())
+            startOfflineMeeting()
         }
 
         // 演示模式按钮
@@ -123,6 +129,7 @@ class MeetingFragment : Fragment() {
         binding.btnStartEnd.setOnClickListener {
             if (viewModel.uiState.value.isMeetingActive) {
                 viewModel.endMeeting()
+                stopMeetingService()
             } else {
                 startRealMeeting()
             }
@@ -139,6 +146,15 @@ class MeetingFragment : Fragment() {
     }
 
     private fun startRealMeeting() {
+        requestPermissionsAndStart(StartMode.REALTIME)
+    }
+
+    private fun startOfflineMeeting() {
+        requestPermissionsAndStart(StartMode.OFFLINE)
+    }
+
+    private fun requestPermissionsAndStart(mode: StartMode) {
+        pendingStartMode = mode
         // Android 13+ 先请求通知权限
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val hasNotification = ContextCompat.checkSelfPermission(
@@ -149,7 +165,7 @@ class MeetingFragment : Fragment() {
                 return
             }
         }
-        checkAudioPermissionAndStart()
+        checkAudioPermissionAndStart(mode)
     }
 
     fun startUpload(meetingId: Long) {
@@ -160,19 +176,19 @@ class MeetingFragment : Fragment() {
         viewModel.recoverFromCrash(state)
     }
 
-    private fun checkAudioPermissionAndStart() {
+    private fun checkAudioPermissionAndStart(mode: StartMode) {
         val hasAudio = ContextCompat.checkSelfPermission(
             requireContext(), Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
 
         if (hasAudio) {
-            startMeetingWithService()
+            startMeetingWithService(mode)
         } else {
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
-    private fun startMeetingWithService() {
+    private fun startMeetingWithService(mode: StartMode) {
         try {
             val intent = Intent(requireContext(), AudioCaptureService::class.java)
             ContextCompat.startForegroundService(requireContext(), intent)
@@ -187,7 +203,14 @@ class MeetingFragment : Fragment() {
         val title = binding.etMeetingTitle.text.toString().trim().ifBlank { "会议" }
         val language = getSelectedLanguage()
         val tag = getSelectedTag()
-        viewModel.startMeeting(title, language, tag)
+        when (mode) {
+            StartMode.REALTIME -> viewModel.startMeeting(title, language, tag)
+            StartMode.OFFLINE -> viewModel.startOfflineMeeting(title, language, tag)
+        }
+    }
+
+    private fun stopMeetingService() {
+        requireContext().stopService(Intent(requireContext(), AudioCaptureService::class.java))
     }
 
     private fun observeState() {

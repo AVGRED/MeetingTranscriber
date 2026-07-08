@@ -1,6 +1,6 @@
 package com.example.meetingtranscriber.ui.meeting
 
-import com.example.meetingtranscriber.network.AsrWebSocketClient
+import com.example.meetingtranscriber.network.ConnectionState
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -17,7 +17,7 @@ class MeetingUiStateTest {
         assertFalse(state.isSpeaking)
         assertFalse(state.isUploading)
         assertEquals(0, state.elapsedSeconds)
-        assertEquals(AsrWebSocketClient.ConnectionState.DISCONNECTED, state.connectionState)
+        assertEquals(ConnectionState.DISCONNECTED, state.connectionState)
         assertEquals("", state.interimText)
         assertTrue(state.speakerLabels.isEmpty())
         assertEquals(0, state.speakerCount)
@@ -133,17 +133,17 @@ class MeetingUiStateTest {
     @Test
     fun `connection state transitions`() {
         val connected = MeetingUiState(
-            connectionState = AsrWebSocketClient.ConnectionState.CONNECTED,
+            connectionState = ConnectionState.CONNECTED,
             isConnected = true
         )
-        assertEquals(AsrWebSocketClient.ConnectionState.CONNECTED, connected.connectionState)
+        assertEquals(ConnectionState.CONNECTED, connected.connectionState)
         assertTrue(connected.isConnected)
 
         val disconnected = connected.copy(
-            connectionState = AsrWebSocketClient.ConnectionState.DISCONNECTED,
+            connectionState = ConnectionState.DISCONNECTED,
             isConnected = false
         )
-        assertEquals(AsrWebSocketClient.ConnectionState.DISCONNECTED, disconnected.connectionState)
+        assertEquals(ConnectionState.DISCONNECTED, disconnected.connectionState)
         assertFalse(disconnected.isConnected)
     }
 

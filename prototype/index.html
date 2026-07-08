@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>MeetingTranscriber - 会议纪要助手</title>
+<style>
+  :root {
+    --primary: #6750A4; --on-primary: #FFF;
+    --primary-container: #EADDFF; --on-primary-container: #21005D;
+    --primary-fixed: #EADDFF; --primary-fixed-dim: #D0BCFF;
+    --secondary: #625B71; --secondary-container: #E8DEF8;
+    --tertiary: #7D5260; --tertiary-container: #FFD8E4;
+    --surface: #FEF7FF; --surface-dim: #DED8E1;
+    --surface-bright: #FEF7FF; --surface-container: #F3EDF7;
+    --surface-container-low: #F7F2FA; --surface-container-high: #ECE6F0;
+    --surface-variant: #E7E0EC; --on-surface-variant: #49454F;
+    --outline: #79747E; --outline-variant: #CAC4D0;
+    --error: #B3261E; --error-container: #F9DEDC;
+    --success: #1B873B; --success-container: #D9F0E0;
+    --warning: #A85D00; --warning-container: #FFDDB3;
+    --scrim: rgba(0,0,0,0.4);
+    --shadow-1: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-2: 0 2px 6px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
+    --shadow-3: 0 4px 12px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.06);
+    --radius-xs: 6px; --radius-sm: 10px; --radius-md: 16px;
+    --radius-lg: 22px; --radius-xl: 28px; --radius-full: 100px;
+    --ease-out: cubic-bezier(0,0,0.2,1); --ease-in: cubic-bezier(0.4,0,1,1);
+    --ease-standard: cubic-bezier(0.4,0,0.2,1);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+    background: #1a1a1e; display:flex; justify-content:center; align-items:center;
+    min-height:100vh; padding:24px; -webkit-font-smoothing:antialiased;
+  }
+
+  .phone-frame {
+    width:390px; height:844px; background:var(--surface); border-radius:40px;
+    overflow:hidden; display:flex; flex-direction:column; position:relative;
+    box-shadow: 0 0 0 8px #161618, 0 0 0 10px #2a2a2e, 0 20px 60px rgba(0,0,0,0.5);
+  }
+
+  /* Status bar */
+  .status-bar {
+    height:48px; background:var(--surface); display:flex;
+    justify-content:space-between; align-items:center; padding:14px 28px 0;
+    font-size:13px; font-weight:600; color:var(--on-surface-variant); flex-shrink:0;
+  }
+
+  /* Top bar */
+  .top-bar {
+    height:56px; background:var(--surface); display:flex; align-items:center;
+    padding:0 16px; flex-shrink:0; gap:4px; transition:all 0.3s var(--ease-standard);
+  }
+  .top-bar .title-text { font-size:22px; font-weight:600; color:#1C1B1F; letter-spacing:-0.3px; }
+  .top-bar .title-emoji { font-size:22px; margin-right:6px; }
+
+  .main-content { flex:1; overflow-y:auto; overflow-x:hidden; position:relative; }
+  .main-content::-webkit-scrollbar { width:0; }
+
+  /* ── Bottom nav ── */
+  .bottom-nav {
+    height:68px; background:var(--surface-container); display:flex;
+    justify-content:space-around; align-items:center; padding:0 8px 8px;
+    flex-shrink:0; position:relative;
+  }
+  .bottom-nav::before {
+    content:''; position:absolute; top:0; left:16px; right:16px;
+    height:1px; background:var(--outline-variant); opacity:0.4;
+  }
+  .nav-item {
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    padding:6px 16px; border-radius:16px; cursor:pointer; transition:all 0.25s var(--ease-standard);
+    border:none; background:none; color:var(--on-surface-variant); font-size:11px; font-weight:500;
+    position:relative; min-width:64px;
+  }
+  .nav-item .nav-icon { font-size:22px; line-height:1; transition:all 0.25s var(--ease-standard); }
+  .nav-item .nav-label { font-size:11px; letter-spacing:0.2px; }
+  .nav-item.active { color:var(--primary); }
+  .nav-item.active::before {
+    content:''; position:absolute; top:-1px; width:32px; height:3px;
+    background:var(--primary); border-radius:0 0 3px 3px;
+  }
+  .nav-badge {
+    position:absolute; top:2px; right:8px; width:8px; height:8px;
+    background:var(--error); border-radius:50%; border:2px solid var(--surface-container);
+    display:none;
+  }
+
+  /* ── Pages ── */
+  .page {
+    display:none; padding:12px 16px 24px;
+    animation:fadeIn 0.25s var(--ease-out);
+  }
+  .page.active { display:block; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+  /* ── Section card ── */
+  .section-card {
+    background:#FFF; border-radius:var(--radius-md); padding:18px 16px;
+    margin-bottom:12px; box-shadow:var(--shadow-1);
+    transition:box-shadow 0.2s var(--ease-standard);
+  }
+  .section-card.interactive { cursor:pointer; }
+  .section-card.interactive:hover { box-shadow:var(--shadow-2); }
+  .section-card.interactive:active { background:var(--surface-container-low); }
+  .section-label {
+    font-size:11px; font-weight:600; color:var(--secondary); letter-spacing:0.8px;
+    text-transform:uppercase; margin-bottom:14px; display:flex; align-items:center; gap:8px;
+  }
+  .section-label .s-icon { width:20px; height:20px; border-radius:6px; display:inline-flex;
+    align-items:center; justify-content:center; font-size:13px; }
+
+  /* ── Config summary (home top) ── */
+  .config-summary {
+    display:flex; gap:10px; margin-bottom:12px;
+  }
+  .config-chip {
+    flex:1; padding:12px; background:var(--surface-container-low); border-radius:var(--radius-sm);
+    text-align:center; cursor:pointer; transition:all 0.2s; border:1.5px solid transparent;
+  }
+  .config-chip:hover { background:var(--primary-container); border-color:var(--primary); }
+  .config-chip .c-emoji { font-size:22px; margin-bottom:4px; }
+  .config-chip .c-title { font-size:11px; font-weight:600; color:var(--secondary); }
+  .config-chip .c-value { font-size:13px; font-weight:600; color:var(--on-surface-variant); margin-top:2px; }
+  .config-chip .c-status { width:6px; height:6px; border-radius:50%; display:inline-block; margin-right:4px; }
+  .c-status.ready { background:var(--success); }
+  .c-status.missing { background:var(--error); }
+  .c-status.untested { background:var(--warning); }
+
+  /* ── ASR chip row ── */
+  .chip-scroll {
+    position:relative; margin-bottom:12px;
+  }
+  .chip-scroll::after {
+    content:''; position:absolute; right:0; top:0; bottom:0; width:24px;
+    background:linear-gradient(to right, transparent, #FFF); pointer-events:none;
+    border-radius:0 var(--radius-sm) 0 0;
+  }
+  .chip-row {
+    display:flex; gap:6px; overflow-x:auto; padding:2px 2px 8px; scroll-behavior:smooth;
+  }
+  .chip-row::-webkit-scrollbar { height:0; }
+  .chip {
+    flex-shrink:0; padding:7px 14px; border-radius:var(--radius-full);
+    font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s var(--ease-standard);
+    border:1px solid var(--outline-variant); background:#FFF; color:var(--on-surface-variant);
+    white-space:nowrap; user-select:none;
+  }
+  .chip:active { transform:scale(0.96); }
+  .chip.selected {
+    background:var(--primary-container); color:var(--on-primary-container);
+    border-color:var(--primary); font-weight:600;
+  }
+
+  /* ── Status badge ── */
+  .status-badge {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:3px 10px; border-radius:var(--radius-full); font-size:11px; font-weight:600; margin-bottom:10px;
+  }
+  .status-badge.ready { background:var(--success-container); color:var(--success); }
+  .status-badge.missing { background:var(--error-container); color:var(--error); }
+  .status-badge.untested { background:var(--warning-container); color:var(--warning); }
+  .sb-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .ready .sb-dot { background:var(--success); }
+  .missing .sb-dot { background:var(--error); }
+  .untested .sb-dot { background:var(--warning); }
+
+  /* ── Inputs ── */
+  .input-group { margin-bottom:10px; }
+  .input-group .ilabel { display:block; font-size:11px; font-weight:500; color:var(--secondary); margin-bottom:4px; letter-spacing:0.2px; }
+  .input-wrap { position:relative; display:flex; align-items:center; }
+  .input-wrap input, .input-wrap select {
+    width:100%; padding:11px 36px 11px 14px; border:1.5px solid var(--outline-variant);
+    border-radius:var(--radius-xs); font-size:13px; color:#1C1B1F;
+    background:var(--surface-container-low); transition:all 0.2s; outline:none; font-family:inherit;
+  }
+  .input-wrap input:focus, .input-wrap select:focus {
+    border-color:var(--primary); background:#FFF; box-shadow:0 0 0 3px rgba(103,80,164,0.10);
+  }
+  .input-wrap .pw-toggle {
+    position:absolute; right:8px; background:none; border:none; cursor:pointer;
+    font-size:16px; color:var(--outline); padding:4px; line-height:1; transition:color 0.2s;
+  }
+  .input-wrap .pw-toggle:hover { color:var(--primary); }
+  .input-wrap select { padding-right:30px; appearance:none; cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2379747E' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'%3E%3C/path%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 12px center;
+  }
+  .input-row { display:flex; gap:8px; }
+  .input-row .input-group { flex:1; }
+
+  /* ── Buttons ── */
+  .btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:10px 20px; border-radius:var(--radius-full); font-size:13px; font-weight:600;
+    cursor:pointer; transition:all 0.2s var(--ease-standard); border:none; font-family:inherit;
+    letter-spacing:0.2px; user-select:none; white-space:nowrap;
+  }
+  .btn:active { transform:scale(0.97); }
+  .btn-filled {
+    background:var(--primary); color:#FFF; box-shadow:var(--shadow-1);
+  }
+  .btn-filled:hover { background:#5E48A8; box-shadow:var(--shadow-2); }
+  .btn-filled:disabled { background:var(--surface-dim); color:var(--outline); box-shadow:none; cursor:default; }
+  .btn-tonal { background:var(--secondary-container); color:var(--on-primary-container); }
+  .btn-tonal:hover { background:var(--primary-fixed-dim); }
+  .btn-outlined {
+    border:1.5px solid var(--outline-variant); background:transparent; color:var(--primary);
+  }
+  .btn-outlined:hover { background:var(--primary-container); border-color:var(--primary); }
+  .btn-outlined.danger { color:var(--error); border-color:var(--error); }
+  .btn-outlined.danger:hover { background:var(--error-container); }
+  .btn-block { width:100%; }
+  .btn-lg { padding:14px 24px; font-size:15px; }
+  .btn-sm { padding:7px 14px; font-size:11px; }
+  .btn-row { display:flex; gap:8px; margin-top:10px; }
+  .btn-row .btn { flex:1; }
+
+  /* ── Advanced toggle ── */
+  .adv-toggle {
+    display:flex; align-items:center; gap:6px; margin-top:8px; cursor:pointer;
+    color:var(--outline); font-size:11px; font-weight:500; border:none; background:none; padding:4px 0;
+    transition:color 0.2s;
+  }
+  .adv-toggle:hover { color:var(--primary); }
+  .adv-toggle .arr { transition:transform 0.3s var(--ease-standard); font-size:10px; }
+  .adv-toggle.open .arr { transform:rotate(180deg); }
+  .adv-panel { display:none; margin-top:8px; padding-top:10px; border-top:1px dashed var(--outline-variant); }
+  .adv-panel.open { display:block; animation:fadeIn 0.2s var(--ease-out); }
+
+  /* ═══════════════ MEETING PAGE ═══════════════ */
+  .meeting-hero {
+    text-align:center; padding:8px 0 4px;
+  }
+  .meeting-timer {
+    font-size:52px; font-weight:200; color:#1C1B1F;
+    font-variant-numeric:tabular-nums; letter-spacing:2px; line-height:1.2;
+  }
+  .meeting-subtitle {
+    font-size:12px; color:var(--secondary); margin-top:2px;
+  }
+  .meeting-badge {
+    display:inline-block; padding:3px 12px; border-radius:var(--radius-full);
+    font-size:11px; font-weight:600; margin-top:6px;
+  }
+  .meeting-badge.realtime { background:var(--success-container); color:var(--success); }
+  .meeting-badge.offline { background:var(--warning-container); color:var(--warning); }
+  .meeting-badge.demo { background:var(--primary-container); color:var(--on-primary-container); }
+
+  /* Waveform VU */
+  .waveform {
+    display:flex; justify-content:center; align-items:center; gap:2px;
+    height:52px; margin:10px 0 14px; position:relative;
+  }
+  .wave-bar {
+    width:3px; border-radius:2px; background:var(--outline-variant);
+    transition:height 0.08s ease-out, background 0.15s;
+  }
+  .wave-bar.hot { background:var(--primary); }
+  .wave-bar.warm { background:var(--primary-container); }
+
+  /* Connection banner */
+  .conn-banner {
+    display:none; padding:8px 14px; border-radius:var(--radius-xs); font-size:12px;
+    font-weight:500; margin-bottom:10px; align-items:center; justify-content:center; gap:8px;
+  }
+  .conn-banner.show { display:flex; }
+  .conn-banner.reconnecting { background:var(--warning-container); color:var(--warning); }
+  .conn-banner.failed { background:var(--error-container); color:var(--error); }
+
+  /* Transcript */
+  .transcript-panel {
+    background:#FFF; border-radius:var(--radius-md); padding:12px 14px;
+    max-height:220px; overflow-y:auto; margin-bottom:12px; box-shadow:var(--shadow-1);
+    font-size:13px; line-height:1.75; position:relative;
+  }
+  .transcript-panel::-webkit-scrollbar { width:4px; }
+  .transcript-panel::-webkit-scrollbar-thumb { background:var(--outline-variant); border-radius:2px; }
+  .ts-segment {
+    margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.03);
+    animation:fadeIn 0.3s var(--ease-out);
+  }
+  .ts-speaker {
+    font-weight:600; font-size:11px; margin-bottom:2px; display:flex; align-items:center; gap:6px;
+  }
+  .ts-speaker .sp-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .ts-speaker .sp-name { }
+  .ts-speaker .sp-time { font-weight:400; color:var(--outline); font-size:10px; margin-left:auto; }
+  .ts-text { color:#1C1B1F; }
+  .ts-interim {
+    padding:6px 10px; margin:4px 0; background:var(--surface-container-low);
+    border-radius:var(--radius-xs); color:var(--outline); font-style:italic; font-size:12px;
+    animation:pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+  /* Meeting controls */
+  .meeting-ctrls { display:flex; gap:10px; }
+  .meeting-ctrls .btn { flex:1; }
+  #btnEnd { background:var(--error) !important; }
+
+  /* Countdown overlay */
+  .countdown-overlay {
+    position:absolute; inset:0; background:rgba(0,0,0,0.5);
+    display:flex; align-items:center; justify-content:center; z-index:10;
+  }
+  .countdown-num { font-size:80px; font-weight:200; color:#FFF; }
+
+  /* ═══════════════ HISTORY PAGE ═══════════════ */
+  .search-bar {
+    display:flex; align-items:center; gap:8px; background:var(--surface-container-high);
+    border-radius:var(--radius-full); padding:8px 16px; margin-bottom:14px;
+  }
+  .search-bar input {
+    flex:1; border:none; background:none; font-size:13px; outline:none; color:#1C1B1F;
+    font-family:inherit;
+  }
+  .search-bar input::placeholder { color:var(--outline); }
+  .search-bar .search-icon { color:var(--outline); font-size:16px; }
+
+  .hist-item {
+    background:#FFF; border-radius:var(--radius-sm); padding:14px 16px;
+    margin-bottom:8px; box-shadow:var(--shadow-1); cursor:pointer;
+    transition:all 0.2s var(--ease-standard); position:relative; overflow:hidden;
+  }
+  .hist-item:active { background:var(--surface-container-low); transform:scale(0.985); }
+  .hist-item .hi-title { font-size:15px; font-weight:600; color:#1C1B1F; margin-bottom:4px; }
+  .hist-item .hi-meta { font-size:11px; color:var(--outline); display:flex; gap:16px; flex-wrap:wrap; }
+  .hist-item .hi-tag {
+    display:inline-block; padding:2px 10px; border-radius:var(--radius-full);
+    font-size:10px; font-weight:600; margin-top:6px;
+  }
+  .hi-tag.产品 { background:#E8DEF8; color:#4A4458; }
+  .hi-tag.技术 { background:#D9EAFB; color:#2E4A6B; }
+  .hi-tag.客户 { background:#FFE6D6; color:#6B4C3B; }
+  .hi-tag.人事 { background:#E0F2E9; color:#2E4A3B; }
+  .hi-tag.其他 { background:#F0F0F0; color:#555; }
+  .hi-swipe-hint {
+    position:absolute; right:16px; top:50%; transform:translateY(-50%);
+    color:var(--outline); font-size:18px; opacity:0; transition:opacity 0.3s;
+  }
+  .hist-item:hover .hi-swipe-hint { opacity:1; }
+
+  .empty-state {
+    text-align:center; padding:48px 24px; color:var(--outline);
+  }
+  .empty-state .es-icon { font-size:56px; margin-bottom:12px; opacity:0.5; }
+  .empty-state .es-title { font-size:16px; font-weight:600; color:var(--secondary); margin-bottom:4px; }
+  .empty-state .es-desc { font-size:13px; }
+
+  /* ── Detail overlay (slide from bottom) ── */
+  .detail-overlay {
+    position:absolute; inset:0; z-index:20; display:none; flex-direction:column;
+  }
+  .detail-overlay.open { display:flex; }
+  .detail-backdrop {
+    position:absolute; inset:0; background:var(--scrim);
+    animation:fadeIn 0.3s var(--ease-out);
+  }
+  .detail-sheet {
+    position:absolute; bottom:0; left:0; right:0; max-height:82%;
+    background:var(--surface); border-radius:28px 28px 0 0;
+    padding:20px 16px 28px; overflow-y:auto; z-index:1;
+    box-shadow:0 -8px 32px rgba(0,0,0,0.15);
+    animation:slideUp 0.35s var(--ease-out);
+    display:flex; flex-direction:column;
+  }
+  @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
+  .detail-handle {
+    width:36px; height:4px; background:var(--outline-variant);
+    border-radius:2px; margin:0 auto 16px; flex-shrink:0;
+  }
+  .detail-sheet h3 { font-size:18px; font-weight:600; margin-bottom:4px; color:#1C1B1F; }
+  .detail-sheet .ds-meta { font-size:11px; color:var(--outline); margin-bottom:14px; }
+  .detail-sheet .ds-summary {
+    background:var(--surface-container-low); border-radius:var(--radius-sm);
+    padding:14px; font-size:13px; line-height:1.7; color:var(--secondary); margin-bottom:12px;
+  }
+  .detail-sheet .ds-summary h4 { font-size:11px; color:var(--primary); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; }
+  .detail-actions { display:flex; gap:8px; margin-top:8px; }
+  .detail-actions .btn { flex:1; }
+
+  /* ═══════════════ SETTINGS ═══════════════ */
+  .setting-item {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:14px 0; border-bottom:1px solid rgba(0,0,0,0.04);
+  }
+  .setting-item:last-child { border-bottom:none; }
+  .setting-item .si-label { font-size:14px; color:#1C1B1F; font-weight:500; }
+  .setting-item .si-hint { font-size:11px; color:var(--outline); margin-top:2px; }
+  .toggle {
+    width:48px; height:28px; background:var(--surface-dim); border-radius:14px;
+    cursor:pointer; position:relative; transition:background 0.25s var(--ease-standard);
+    border:none; flex-shrink:0;
+  }
+  .toggle.on { background:var(--primary); }
+  .toggle::after {
+    content:''; position:absolute; top:3px; left:3px; width:22px; height:22px;
+    background:#FFF; border-radius:50%; transition:all 0.25s var(--ease-standard);
+    box-shadow:0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle.on::after { left:23px; box-shadow:0 1px 4px rgba(0,0,0,0.25); }
+  .toggle:active::after { width:26px; }
+
+  .storage-bar {
+    height:6px; background:var(--surface-variant); border-radius:3px; margin-top:6px; overflow:hidden;
+  }
+  .storage-bar .used {
+    height:100%; background:var(--primary); border-radius:3px; transition:width 0.5s var(--ease-standard);
+  }
+
+  /* Toast / snackbar */
+  .snackbar {
+    position:absolute; bottom:88px; left:16px; right:16px; z-index:30;
+    background:#313033; color:#FFF; padding:12px 18px; border-radius:var(--radius-xs);
+    font-size:12px; font-weight:500; display:flex; align-items:center; gap:12px;
+    box-shadow:var(--shadow-3); opacity:0; transform:translateY(12px);
+    transition:all 0.3s var(--ease-standard); pointer-events:none;
+  }
+  .snackbar.show { opacity:1; transform:translateY(0); pointer-events:auto; }
+  .snackbar .snack-action { color:var(--primary-fixed-dim); font-weight:600; cursor:pointer; margin-left:auto; background:none; border:none; font-size:12px; }
+
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .spinner { display:inline-block; animation:spin 0.7s linear infinite; }
+</style>
+</head>
+<body>
+
+<div class="phone-frame" id="phoneFrame">
+  <div class="status-bar">
+    <span id="timeDisplay">9:41</span>
+    <span style="font-size:12px;">🔋 85% &nbsp; 📶</span>
+  </div>
+
+  <div class="top-bar" id="topBar">
+    <span class="title-emoji">🎙️</span>
+    <span class="title-text">MeetingTranscriber</span>
+  </div>
+
+  <div class="main-content" id="mainContent">
+
+    <!-- ═══════════ HOME ═══════════ -->
+    <div class="page active" id="page-home">
+
+      <!-- Config summary -->
+      <div class="config-summary">
+        <div class="config-chip" onclick="document.getElementById('asrSection').scrollIntoView({behavior:'smooth'})">
+          <div class="c-emoji">🎤</div>
+          <div class="c-title">语音引擎</div>
+          <div class="c-value"><span class="c-status missing" id="asrSummaryDot"></span><span id="asrSummaryName">通义听悟</span></div>
+        </div>
+        <div class="config-chip" onclick="document.getElementById('llmSection').scrollIntoView({behavior:'smooth'})">
+          <div class="c-emoji">🤖</div>
+          <div class="c-title">AI 摘要</div>
+          <div class="c-value"><span class="c-status missing" id="llmSummaryDot"></span><span id="llmSummaryName">未配置</span></div>
+        </div>
+        <div class="config-chip" onclick="switchTab('meeting', document.querySelector('[data-tab=meeting]'))">
+          <div class="c-emoji">⚡</div>
+          <div class="c-title">快速会议</div>
+          <div class="c-value" style="color:var(--primary);">进入 →</div>
+        </div>
+      </div>
+
+      <!-- ASR Section -->
+      <div class="section-card" id="asrSection">
+        <div class="section-label"><span class="s-icon">🎤</span> 语音识别引擎</div>
+
+        <div class="status-badge" id="asrStatusBadge">
+          <span class="sb-dot"></span><span id="asrStatusText">未检测</span>
+        </div>
+
+        <div class="chip-scroll">
+          <div class="chip-row" id="asrChipRow"></div>
+        </div>
+
+        <div id="asrFieldsContainer"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-tonal btn-sm" onclick="testAsrConnection()" id="asrTestBtn">🔑 测试连接</button>
+          <button class="btn btn-outlined danger btn-sm" onclick="clearAsrKeys()">清除</button>
+        </div>
+      </div>
+
+      <!-- LLM Section -->
+      <div class="section-card" id="llmSection">
+        <div class="section-label"><span class="s-icon">🤖</span> AI 摘要模型</div>
+
+        <div class="status-badge" id="llmStatusBadge">
+          <span class="sb-dot"></span><span id="llmStatusText">未检测</span>
+        </div>
+
+        <div class="input-group">
+          <label class="ilabel">模型选择</label>
+          <div class="input-wrap">
+            <select id="llmModelSelect" onchange="onLlmModelChange()"></select>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label class="ilabel">API Key</label>
+          <div class="input-wrap">
+            <input type="password" id="llmApiKey" placeholder="sk-..." oninput="updateLlmStatus()">
+            <button class="pw-toggle" onclick="togglePw('llmApiKey',this)" title="显示/隐藏">👁</button>
+          </div>
+        </div>
+
+        <button class="adv-toggle" id="advToggle" onclick="toggleAdvanced()">
+          ⚙️ 高级选项 <span class="arr">▾</span>
+        </button>
+        <div class="adv-panel" id="advancedSection">
+          <div class="input-group">
+            <label class="ilabel">自定义 API 端点</label>
+            <div class="input-wrap">
+              <input type="text" id="llmBaseUrl" placeholder="自动匹配">
+            </div>
+          </div>
+          <div class="input-group">
+            <label class="ilabel">自定义模型名</label>
+            <div class="input-wrap">
+              <input type="text" id="llmCustomModel" placeholder="覆盖上方选择">
+            </div>
+          </div>
+          <div class="input-group">
+            <label class="ilabel">Temperature</label>
+            <div class="input-wrap">
+              <select id="llmTemperature">
+                <option value="0">0.0 — 确定</option>
+                <option value="0.1">0.1 — 精确</option>
+                <option value="0.3" selected>0.3 — 平衡 (推荐)</option>
+                <option value="0.5">0.5 — 中等</option>
+                <option value="0.7">0.7 — 创意</option>
+                <option value="1.0">1.0 — 随机</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-tonal btn-sm" onclick="testLlmConnection()" id="llmTestBtn">🔑 测试连接</button>
+          <button class="btn btn-outlined danger btn-sm" onclick="clearLlmKeys()">清除</button>
+        </div>
+      </div>
+
+      <div style="text-align:center;color:var(--outline);font-size:11px;padding:4px 0 8px;">
+        🔒 所有密钥加密存储于本地 · 仅用于 API 调用
+      </div>
+    </div>
+
+    <!-- ═══════════ MEETING ═══════════ -->
+    <div class="page" id="page-meeting">
+      <!-- Pre-recording config -->
+      <div id="meetingConfigArea">
+        <div class="section-card">
+          <div class="section-label"><span class="s-icon">⚙️</span> 会议设置</div>
+          <div class="input-group">
+            <label class="ilabel">会议标题</label>
+            <div class="input-wrap">
+              <input type="text" id="meetingTitle" value="会议_07-07_09:30">
+            </div>
+          </div>
+          <div class="input-row">
+            <div class="input-group">
+              <label class="ilabel">转写语言</label>
+              <div class="input-wrap">
+                <select id="meetingLang">
+                  <option value="cn">中文 (普通话)</option>
+                  <option value="en">English</option>
+                  <option value="yue">粤语</option>
+                  <option value="ja">日本語</option>
+                  <option value="ko">한국어</option>
+                </select>
+              </div>
+            </div>
+            <div class="input-group">
+              <label class="ilabel">标签</label>
+              <div class="input-wrap">
+                <select id="meetingTag">
+                  <option>无标签</option><option>产品</option><option>技术</option>
+                  <option>客户</option><option>人事</option><option>其他</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card" style="text-align:center;">
+          <div class="section-label" style="justify-content:center;"><span class="s-icon">🟢</span> 当前引擎：<span id="meetingEngineLabel">通义听悟</span></div>
+        </div>
+
+        <button class="btn btn-filled btn-lg btn-block" onclick="startRealMeeting()">
+          ▶ 开始实时会议
+        </button>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn btn-outlined" onclick="startOfflineMeeting()">📴 离线录音</button>
+          <button class="btn btn-outlined" onclick="startDemoMeeting()">🎬 演示模式</button>
+        </div>
+      </div>
+
+      <!-- Recording UI -->
+      <div id="meetingRecordingArea" style="display:none;">
+        <div class="conn-banner" id="meetingConnBanner">
+          <span id="meetingConnText"></span>
+          <button class="btn btn-sm btn-outlined" id="meetingRetryBtn" onclick="retryConnection()" style="display:none;">重试</button>
+        </div>
+
+        <div class="meeting-hero">
+          <div class="meeting-badge realtime" id="meetingModeBadge">● 实时转写</div>
+          <div class="meeting-timer" id="meetingTimer">00:00:00</div>
+          <div class="meeting-subtitle" id="meetingSpeakerInfo">等待语音...</div>
+        </div>
+
+        <div class="waveform" id="waveform"></div>
+
+        <div class="transcript-panel" id="transcriptBox">
+          <div style="text-align:center;color:var(--outline);padding:20px;font-size:13px;" id="transcriptPlaceholder">
+            🎤 等待语音输入...
+          </div>
+        </div>
+
+        <div class="meeting-ctrls">
+          <button class="btn btn-outlined" id="btnPause" onclick="togglePause()">⏸ 暂停</button>
+          <button class="btn btn-filled" id="btnEnd" onclick="endMeeting()">⏹ 结束会议</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ HISTORY ═══════════ -->
+    <div class="page" id="page-history">
+      <div class="search-bar">
+        <span class="search-icon">🔍</span>
+        <input type="text" placeholder="搜索会议..." id="historySearch" oninput="filterHistory()">
+      </div>
+      <div id="historyList"></div>
+    </div>
+
+    <!-- ═══════════ SETTINGS ═══════════ -->
+    <div class="page" id="page-settings">
+      <div class="section-card">
+        <div class="section-label"><span class="s-icon">💡</span> 通用</div>
+        <div class="setting-item">
+          <div><div class="si-label">后台静默运行</div><div class="si-hint">关闭界面后保持录音</div></div>
+          <button class="toggle" onclick="this.classList.toggle('on')"></button>
+        </div>
+        <div class="setting-item">
+          <div><div class="si-label">自动上传离线录音</div><div class="si-hint">网络恢复后自动上传</div></div>
+          <button class="toggle on" onclick="this.classList.toggle('on')"></button>
+        </div>
+        <div class="setting-item">
+          <div><div class="si-label">清理 30 天前录音</div><div class="si-hint">自动释放存储空间</div></div>
+          <button class="toggle on" onclick="this.classList.toggle('on')"></button>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-label"><span class="s-icon">📚</span> 词库管理</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <button class="btn btn-tonal btn-sm" onclick="snackbar('新建词库功能')">＋ 新建</button>
+          <button class="btn btn-outlined btn-sm" onclick="snackbar('导入词库功能')">📥 导入</button>
+        </div>
+        <div style="color:var(--outline);font-size:12px;text-align:center;padding:14px;">
+          暂无自定义词库
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-label"><span class="s-icon">☁️</span> 云同步</div>
+        <div class="btn-row">
+          <button class="btn btn-outlined btn-sm" onclick="snackbar('导出完成，文件已保存')">📤 导出备份</button>
+          <button class="btn btn-outlined btn-sm" onclick="snackbar('请选择要导入的文件')">📥 导入备份</button>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-label"><span class="s-icon">💾</span> 存储空间</div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:#1C1B1F;">
+          <span>已用 1.2 GB / 可用 8.6 GB</span><span style="color:var(--outline);">12%</span>
+        </div>
+        <div class="storage-bar"><div class="used" style="width:12%;"></div></div>
+        <button class="btn btn-outlined btn-sm" style="margin-top:10px;" onclick="snackbar('已释放 340 MB')">🗑 清理缓存</button>
+      </div>
+
+      <div class="section-card">
+        <div class="section-label"><span class="s-icon">ℹ️</span> 关于</div>
+        <div class="setting-item">
+          <div class="si-label">版本号</div><div style="color:var(--outline);font-size:13px;">v1.0.0-alpha (build 42)</div>
+        </div>
+        <div class="setting-item">
+          <div class="si-label">数据统计</div><div style="color:var(--outline);font-size:13px;">4 场会议 · 173 分钟</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Nav -->
+  <div class="bottom-nav">
+    <button class="nav-item active" onclick="switchTab('home', this)" data-tab="home">
+      <span class="nav-icon">🏠</span><span class="nav-label">首页</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('meeting', this)" data-tab="meeting">
+      <span class="nav-icon">🎙️</span><span class="nav-label">会议</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('history', this)" data-tab="history">
+      <span class="nav-icon">📋</span><span class="nav-label">历史</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('settings', this)" data-tab="settings">
+      <span class="nav-icon">⚙️</span><span class="nav-label">设置</span>
+    </button>
+  </div>
+
+  <!-- Detail overlay (slides up from history) -->
+  <div class="detail-overlay" id="detailOverlay">
+    <div class="detail-backdrop" onclick="closeDetail()"></div>
+    <div class="detail-sheet" id="detailSheet"></div>
+  </div>
+
+  <!-- Snackbar -->
+  <div class="snackbar" id="snackbar">
+    <span id="snackMsg"></span>
+    <button class="snack-action" onclick="closeSnackbar()">知道了</button>
+  </div>
+</div>
+
+<script>
+// ════════════════ DATA ════════════════
+
+const ASR_PROVIDERS = [
+  { key:'tingwu', name:'通义听悟', icon:'☁️',
+    fields:[
+      { id:'tw_ak_id', label:'AccessKey ID', ph:'LTAI5t...', pw:false },
+      { id:'tw_ak_secret', label:'AccessKey Secret', ph:'••••••••', pw:true },
+      { id:'tw_app_key', label:'App Key', ph:'tingwu-app-key', pw:false }
+    ]},
+  { key:'volcengine', name:'豆包 ASR', icon:'🫘',
+    fields:[
+      { id:'vc_app_id', label:'App ID', ph:'volc-app-id', pw:false },
+      { id:'vc_token', label:'Access Token / API Key', ph:'••••••••', pw:true },
+      { id:'vc_resource', label:'Resource ID（可选）', ph:'volc-resource-id', pw:false, opt:true },
+      { id:'vc_cluster', label:'Cluster', ph:'volcengine_xxx', pw:false }
+    ]},
+  { key:'iflytek', name:'讯飞语音', icon:'🎯',
+    fields:[
+      { id:'if_app_id', label:'App ID', ph:'appid', pw:false },
+      { id:'if_api_key', label:'API Key', ph:'••••••••', pw:true },
+      { id:'if_api_secret', label:'API Secret', ph:'••••••••', pw:true }
+    ]},
+  { key:'baidu', name:'百度语音', icon:'🔵',
+    fields:[
+      { id:'bd_app_id', label:'App ID', ph:'baidu-app-id', pw:false },
+      { id:'bd_api_key', label:'API Key', ph:'••••••••', pw:true },
+      { id:'bd_secret_key', label:'Secret Key', ph:'••••••••', pw:true }
+    ]},
+  { key:'tencent', name:'腾讯云 ASR', icon:'🔷',
+    fields:[
+      { id:'tc_secret_id', label:'Secret ID', ph:'AKID...', pw:false },
+      { id:'tc_secret_key', label:'Secret Key', ph:'••••••••', pw:true },
+      { id:'tc_app_id', label:'App ID', ph:'1234567890', pw:false }
+    ]},
+  { key:'openai', name:'Whisper', icon:'🤖',
+    fields:[
+      { id:'oa_api_key', label:'API Key', ph:'sk-...', pw:true },
+      { id:'oa_base_url', label:'API Base URL', ph:'https://api.openai.com/v1', pw:false, opt:true }
+    ]},
+  { key:'azure', name:'Azure', icon:'🌐',
+    fields:[
+      { id:'az_sub_key', label:'Subscription Key', ph:'••••••••', pw:true },
+      { id:'az_region', label:'Region', ph:'eastasia', pw:false }
+    ]}
+];
+
+const LLM_MODELS = [
+  { group:'豆包系列', models:[
+    { v:'doubao-seed-1-6-250615', t:'豆包 Seed 1.6 (推荐)' },
+    { v:'doubao-seed-1-6-lite', t:'豆包 Seed 1.6 Lite' },
+    { v:'doubao-pro-32k', t:'豆包 Pro 32K' },
+    { v:'doubao-pro-256k', t:'豆包 Pro 256K' }
+  ]},
+  { group:'通义千问', models:[
+    { v:'qwen-turbo', t:'Qwen Turbo' },
+    { v:'qwen-plus', t:'Qwen Plus' },
+    { v:'qwen-max', t:'Qwen Max' },
+    { v:'qwen3-235b', t:'Qwen3 235B' }
+  ]},
+  { group:'DeepSeek', models:[
+    { v:'deepseek-v3', t:'DeepSeek V3' },
+    { v:'deepseek-r1', t:'DeepSeek R1' },
+    { v:'deepseek-chat', t:'DeepSeek Chat' }
+  ]},
+  { group:'OpenAI', models:[
+    { v:'gpt-4o', t:'GPT-4o' },
+    { v:'gpt-4o-mini', t:'GPT-4o Mini' },
+    { v:'gpt-4-turbo', t:'GPT-4 Turbo' }
+  ]},
+  { group:'Claude', models:[
+    { v:'claude-sonnet-5', t:'Claude Sonnet 5' },
+    { v:'claude-opus-4-8', t:'Claude Opus 4.8' },
+    { v:'claude-haiku-4-5', t:'Claude Haiku 4.5' }
+  ]},
+  { group:'文心一言', models:[
+    { v:'ernie-4.0', t:'ERNIE 4.0' },
+    { v:'ernie-3.5', t:'ERNIE 3.5' }
+  ]},
+  { group:'讯飞星火', models:[
+    { v:'spark-v4.0', t:'星火 V4.0' },
+    { v:'spark-v3.5', t:'星火 V3.5' }
+  ]},
+  { group:'其他', models:[
+    { v:'local', t:'仅本地规则 (无需 API)' },
+    { v:'custom', t:'自定义模型...' }
+  ]}
+];
+
+const HISTORY_DATA = [
+  { id:1, title:'产品评审 — Q3 Roadmap', date:'07-06 14:30', dur:'48 分钟', speakers:3, tag:'产品',
+    transcript:'张经理: 大家好，今天我们讨论一下 Q3 的产品路线图。\n李工: 好的。我这边技术评估基本完成了。\n王产品: 客户那边一直在催新功能。',
+    summary:'本次会议讨论确定了 Q3 三大重点方向：支付模块上线（P0）、搜索优化（P1）、微服务拆分（P2）。团队就优先级达成共识，技术评估已完成，下周进入开发阶段。' },
+  { id:2, title:'技术架构讨论', date:'07-05 10:00', dur:'62 分钟', speakers:4, tag:'技术',
+    transcript:'讨论了微服务拆分方案、数据库迁移策略以及 CI/CD 流水线优化。',
+    summary:'确定了微服务拆分的三期方案：第一期两周内完成核心服务解耦，第二期优化数据层，第三期引入服务网格。' },
+  { id:3, title:'客户需求对接 — 某某银行', date:'07-04 15:00', dur:'35 分钟', speakers:5, tag:'客户',
+    transcript:'与某某银行技术团队讨论了 API 接口规范和数据安全要求。',
+    summary:'客户提出了三点核心需求：数据加密传输、审计日志、高可用部署。技术方案已初步对齐，下周一提交正式方案书。' },
+  { id:4, title:'周例会 — 7月第1周', date:'07-03 09:30', dur:'28 分钟', speakers:6, tag:'人事',
+    transcript:'各部门汇报了上周工作进展和本周计划。',
+    summary:'本周重点：Q3 产品路线图评审、客户某某银行技术方案提交、微服务架构评审。提醒周五下午团建活动。' },
+];
+
+const DEMO_SCRIPT = [
+  { s:0, t:'大家好，今天我们讨论一下 Q3 的产品路线图。' },
+  { s:1, t:'好的。我这边技术评估基本完成了，微服务拆分预计两周内可以上线。' },
+  { s:2, t:'太好了！客户那边一直在催新功能，我们优先级怎么排？' },
+  { s:0, t:'我建议先把支付模块做完，这是客户最关心的。' },
+  { s:1, t:'同意。支付模块的接口已经联调通过了，前端这周可以开始对接。' },
+  { s:2, t:'OK，那我这周出产品方案，下周评审。另外用户反馈搜索体验不好，要一起看吗？' },
+  { s:0, t:'搜索的问题我知道，主要是索引更新延迟。这个问题不大，加一个异步刷新就好。' },
+  { s:1, t:'对，我估计两天能搞定。优先级可以先放一放。' },
+  { s:2, t:'那我记一下：P0 支付上线，P1 搜索优化，P2 微服务拆分。大家有意见吗？' },
+  { s:0, t:'没问题，就按这个顺序来。' },
+  { s:1, t:'没问题。' },
+  { s:0, t:'好，那今天就到这里。下次会议周五下午两点。' },
+];
+const DEMO_SPEAKERS = ['张经理','李工','王产品'];
+const SPEAKER_COLORS = ['#6750A4','#1B873B','#D35400','#2980B9','#8E44AD','#C0392B'];
+
+let currentAsr = 'tingwu';
+let meetingActive=false, meetingPaused=false, meetingSec=0, meetingTimer=null, meetingMode='';
+let demoIdx=0, demoTimeout=null, interimTimeout=null;
+let waveInterval=null;
+
+// ════════════════ INIT ════════════════
+function init() {
+  // ASR chips
+  const row = document.getElementById('asrChipRow');
+  ASR_PROVIDERS.forEach((p,i) => {
+    const chip = document.createElement('button');
+    chip.className = 'chip' + (i===0 ? ' selected':'');
+    chip.textContent = p.icon + ' ' + p.name;
+    chip.dataset.asr = p.key;
+    chip.onclick = () => switchAsr(p.key, chip);
+    row.appendChild(chip);
+  });
+
+  // LLM select
+  const sel = document.getElementById('llmModelSelect');
+  LLM_MODELS.forEach(g => {
+    const og = document.createElement('optgroup');
+    og.label = '── ' + g.group + ' ──';
+    g.models.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m.v; o.textContent = m.t;
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  });
+
+  renderAsrFields();
+  renderHistory();
+  updateAsrStatus();
+  updateLlmStatus();
+  updateConfigSummary();
+  updateTime();
+  updateWaveform();
+  setInterval(updateTime, 30000);
+}
+
+// ════════════════ TIME ════════════════
+function updateTime() {
+  const d = new Date();
+  document.getElementById('timeDisplay').textContent =
+    d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  // Update meeting title placeholder
+  const mt = document.getElementById('meetingTitle');
+  if (mt && !meetingActive) {
+    mt.placeholder = '会议_' +
+      (d.getMonth()+1).toString().padStart(2,'0')+'-'+
+      d.getDate().toString().padStart(2,'0')+'_'+
+      d.getHours().toString().padStart(2,'0')+':'+
+      d.getMinutes().toString().padStart(2,'0');
+  }
+}
+
+// ════════════════ TABS ════════════════
+function switchTab(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const titles = {
+    home:'<span class="title-emoji">🎙️</span><span class="title-text">MeetingTranscriber</span>',
+    meeting:'<span class="title-emoji">🎙️</span><span class="title-text">会议</span>',
+    history:'<span class="title-emoji">📋</span><span class="title-text">会议历史</span>',
+    settings:'<span class="title-emoji">⚙️</span><span class="title-text">设置</span>'
+  };
+  document.getElementById('topBar').innerHTML = titles[name];
+  document.getElementById('mainContent').scrollTop = 0;
+  if (name === 'meeting') startWaveform();
+  else stopWaveform();
+  // Refresh meeting engine label
+  if (name === 'meeting') {
+    const p = ASR_PROVIDERS.find(x => x.key === currentAsr);
+    document.getElementById('meetingEngineLabel').textContent = p ? p.name : '通义听悟';
+  }
+}
+
+// ════════════════ ASR PROVIDER ════════════════
+function switchAsr(key, chip) {
+  currentAsr = key;
+  document.querySelectorAll('#asrChipRow .chip').forEach(c => c.classList.remove('selected'));
+  chip.classList.add('selected');
+  renderAsrFields();
+  updateAsrStatus();
+  updateConfigSummary();
+  chip.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'center' });
+}
+
+function renderAsrFields() {
+  const p = ASR_PROVIDERS.find(x => x.key === currentAsr);
+  let h = '';
+  p.fields.forEach(f => {
+    h += `<div class="input-group">
+      <label class="ilabel">${f.label}</label>
+      <div class="input-wrap">
+        <input type="${f.pw?'password':'text'}" id="${f.id}" placeholder="${f.ph}" oninput="onAsrFieldInput()">
+        ${f.pw ? `<button class="pw-toggle" onclick="togglePw('${f.id}',this)" title="显示">👁</button>` : ''}
+      </div>
+    </div>`;
+  });
+  document.getElementById('asrFieldsContainer').innerHTML = h;
+}
+
+function onAsrFieldInput() { updateAsrStatus(); updateConfigSummary(); }
+
+function getAsrMissing() {
+  const p = ASR_PROVIDERS.find(x => x.key === currentAsr);
+  const missing = [];
+  p.fields.forEach(f => {
+    if (f.opt) return;
+    const el = document.getElementById(f.id);
+    if (el && !el.value.trim()) missing.push(f.label);
+  });
+  if (currentAsr === 'volcengine') {
+    const id = document.getElementById('vc_app_id')?.value.trim();
+    const tok = document.getElementById('vc_token')?.value.trim();
+    if (!id && !tok) return ['App ID 和 Access Token'];
+    if (!id) return ['App ID'];
+    if (!tok) return ['Access Token'];
+    return [];
+  }
+  return missing;
+}
+
+function updateAsrStatus() {
+  const missing = getAsrMissing();
+  const b = document.getElementById('asrStatusBadge');
+  const t = document.getElementById('asrStatusText');
+  b.className = 'status-badge';
+  if (missing.length === 0) { b.classList.add('untested'); t.textContent = '已填写，点击测试'; }
+  else { b.classList.add('missing'); t.textContent = '缺少: ' + missing.join('、'); }
+}
+
+function updateConfigSummary() {
+  const p = ASR_PROVIDERS.find(x => x.key === currentAsr);
+  document.getElementById('asrSummaryName').textContent = p ? p.name : '通义听悟';
+  const missing = getAsrMissing();
+  const dot = document.getElementById('asrSummaryDot');
+  dot.className = 'c-status ' + (missing.length === 0 ? 'untested' : 'missing');
+
+  const model = document.getElementById('llmModelSelect').value;
+  const key = document.getElementById('llmApiKey').value.trim();
+  const sel = document.getElementById('llmModelSelect');
+  document.getElementById('llmSummaryName').textContent = model === 'local' ? '本地规则' :
+    (key ? (sel.options[sel.selectedIndex]?.text || '已配置') : '未配置');
+  const ldot = document.getElementById('llmSummaryDot');
+  ldot.className = 'c-status ' + (model === 'local' ? 'ready' : (key ? 'untested' : 'missing'));
+}
+
+// ════════════════ LLM ════════════════
+function onLlmModelChange() {
+  const v = document.getElementById('llmModelSelect').value;
+  const bu = document.getElementById('llmBaseUrl');
+  if (!bu.value) {
+    const hints = {
+      'doubao':'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+      'deepseek':'https://api.deepseek.com/v1/chat/completions',
+      'gpt-':'https://api.openai.com/v1/chat/completions',
+      'claude-':'https://api.anthropic.com/v1/messages',
+      'ernie':'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat',
+      'qwen':'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+      'spark':'https://spark-api-open.xf-yun.com/v1/chat/completions'
+    };
+    for (const [k, url] of Object.entries(hints)) { if (v.startsWith(k)) { bu.placeholder = url; break; } }
+  }
+  updateLlmStatus(); updateConfigSummary();
+}
+
+function updateLlmStatus() {
+  const model = document.getElementById('llmModelSelect').value;
+  const key = document.getElementById('llmApiKey').value.trim();
+  const b = document.getElementById('llmStatusBadge');
+  const t = document.getElementById('llmStatusText');
+  b.className = 'status-badge';
+  if (model === 'local') { b.classList.add('ready'); t.textContent = '本地规则 (无需 API)'; }
+  else if (key) { b.classList.add('untested'); t.textContent = '已填写，点击测试'; }
+  else { b.classList.add('missing'); t.textContent = '缺少 API Key'; }
+}
+
+// ════════════════ CONNECTION TESTS ════════════════
+function testAsrConnection() {
+  const missing = getAsrMissing();
+  if (missing.length > 0) { snackbar('⚠️ 请先填写: ' + missing.join('、')); return; }
+  const btn = document.getElementById('asrTestBtn');
+  const orig = btn.innerHTML; btn.innerHTML = '<span class="spinner">⏳</span> 测试中...'; btn.disabled = true;
+  setTimeout(() => {
+    btn.innerHTML = orig; btn.disabled = false;
+    const p = ASR_PROVIDERS.find(x => x.key === currentAsr);
+    const badge = document.getElementById('asrStatusBadge');
+    badge.className = 'status-badge ready';
+    document.getElementById('asrStatusText').textContent = '✅ 连接成功 — ' + p.name;
+    document.getElementById('asrSummaryDot').className = 'c-status ready';
+    snackbar('✅ ' + p.name + ' 连接成功');
+  }, 1500);
+}
+
+function testLlmConnection() {
+  const model = document.getElementById('llmModelSelect').value;
+  const key = document.getElementById('llmApiKey').value.trim();
+  if (model === 'local') {
+    document.getElementById('llmStatusBadge').className = 'status-badge ready';
+    document.getElementById('llmStatusText').textContent = '本地规则 (无需 API)';
+    document.getElementById('llmSummaryDot').className = 'c-status ready';
+    snackbar('✅ 本地规则模式，无需测试'); return;
+  }
+  if (!key) { snackbar('⚠️ 请先填写 API Key'); return; }
+  const btn = document.getElementById('llmTestBtn');
+  const orig = btn.innerHTML; btn.innerHTML = '<span class="spinner">⏳</span> 测试中...'; btn.disabled = true;
+  setTimeout(() => {
+    btn.innerHTML = orig; btn.disabled = false;
+    const sel = document.getElementById('llmModelSelect');
+    const name = sel.options[sel.selectedIndex].text;
+    document.getElementById('llmStatusBadge').className = 'status-badge ready';
+    document.getElementById('llmStatusText').textContent = '✅ 连接成功 — ' + name;
+    document.getElementById('llmSummaryDot').className = 'c-status ready';
+    snackbar('✅ ' + name + ' 连接成功');
+  }, 1500);
+}
+
+function clearAsrKeys() {
+  const p = ASR_PROVIDERS.find(x => x.key === currentAsr);
+  p.fields.forEach(f => { const el = document.getElementById(f.id); if (el) el.value = ''; });
+  updateAsrStatus(); updateConfigSummary(); snackbar('ASR 密钥已清除');
+}
+
+function clearLlmKeys() {
+  document.getElementById('llmApiKey').value = '';
+  document.getElementById('llmBaseUrl').value = '';
+  document.getElementById('llmCustomModel').value = '';
+  updateLlmStatus(); updateConfigSummary(); snackbar('LLM 密钥已清除');
+}
+
+function toggleAdvanced() {
+  const panel = document.getElementById('advancedSection');
+  const toggle = document.getElementById('advToggle');
+  panel.classList.toggle('open');
+  toggle.classList.toggle('open');
+}
+
+function togglePw(id, btn) {
+  const input = document.getElementById(id);
+  input.type = input.type === 'password' ? 'text' : 'password';
+  btn.textContent = input.type === 'password' ? '👁' : '🙈';
+}
+
+// ════════════════ MEETING ════════════════
+function startRealMeeting() {
+  startRecording('realtime');
+}
+
+function startOfflineMeeting() {
+  startRecording('offline');
+}
+
+function startDemoMeeting() {
+  startRecording('demo');
+  demoIdx = 0;
+  document.getElementById('transcriptBox').innerHTML = '<div style="text-align:center;color:var(--outline);padding:20px;font-size:13px;" id="transcriptPlaceholder">🎬 演示模式 — 模拟 3 人会议对话</div>';
+  scheduleNextDemo();
+}
+
+function startRecording(mode) {
+  document.getElementById('meetingConfigArea').style.display = 'none';
+  document.getElementById('meetingRecordingArea').style.display = 'block';
+  meetingActive = true; meetingPaused = false; meetingSec = 0; meetingMode = mode;
+  document.getElementById('transcriptBox').innerHTML = '<div style="text-align:center;color:var(--outline);padding:20px;font-size:13px;" id="transcriptPlaceholder">🎤 等待语音输入...</div>';
+  updateMeetingUI();
+  startTimer();
+  startWaveform();
+}
+
+function scheduleNextDemo() {
+  if (!meetingActive || meetingMode !== 'demo') return;
+  if (demoIdx >= DEMO_SCRIPT.length) {
+    // Show interim "正在生成纪要..."
+    showInterim('正在生成会议纪要...');
+    setTimeout(() => {
+      removeInterim();
+      endMeeting();
+    }, 2500);
+    return;
+  }
+
+  // Show interim text first (like real ASR)
+  const line = DEMO_SCRIPT[demoIdx];
+  const speaker = DEMO_SPEAKERS[line.s];
+  let interim = '';
+  const chars = line.t.split('');
+  let ci = 0;
+  showInterim('');
+  function typeChar() {
+    if (!meetingActive) return;
+    if (ci < chars.length) {
+      interim += chars[ci];
+      updateInterim(interim);
+      ci++;
+      interimTimeout = setTimeout(typeChar, 30 + Math.random() * 30);
+    } else {
+      // Finalize
+      removeInterim();
+      appendTranscript(speaker, line.t, SPEAKER_COLORS[line.s], demoIdx);
+      document.getElementById('meetingSpeakerInfo').textContent = '🔊 ' + speaker + ' 正在说话...';
+      demoIdx++;
+      demoTimeout = setTimeout(() => {
+        if (demoIdx >= DEMO_SCRIPT.length) {
+          document.getElementById('meetingSpeakerInfo').textContent = '演示即将结束...';
+        }
+        scheduleNextDemo();
+      }, 600 + Math.random() * 800);
+    }
+  }
+  interimTimeout = setTimeout(typeChar, 200);
+}
+
+function showInterim(text) {
+  removeInterim();
+  const box = document.getElementById('transcriptBox');
+  const ph = document.getElementById('transcriptPlaceholder');
+  if (ph) ph.remove();
+  const div = document.createElement('div');
+  div.className = 'ts-interim'; div.id = 'interimEl'; div.textContent = text || '...';
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function updateInterim(text) {
+  const el = document.getElementById('interimEl');
+  if (el) { el.textContent = text; el.parentElement.scrollTop = el.parentElement.scrollHeight; }
+}
+
+function removeInterim() {
+  const el = document.getElementById('interimEl'); if (el) el.remove();
+  if (interimTimeout) { clearTimeout(interimTimeout); interimTimeout = null; }
+}
+
+function appendTranscript(speaker, text, color, idx) {
+  const box = document.getElementById('transcriptBox');
+  const ph = document.getElementById('transcriptPlaceholder');
+  if (ph) ph.remove();
+  const h = Math.floor(idx / 60);
+  const m = idx % 60;
+  const seg = document.createElement('div');
+  seg.className = 'ts-segment';
+  seg.innerHTML = `<div class="ts-speaker">
+    <span class="sp-dot" style="background:${color};"></span>
+    <span class="sp-name">${speaker}</span>
+    <span class="sp-time">${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}</span>
+  </div>
+  <div class="ts-text">${text}</div>`;
+  box.appendChild(seg);
+  box.scrollTop = box.scrollHeight;
+}
+
+function togglePause() {
+  meetingPaused = !meetingPaused;
+  updateMeetingUI();
+}
+
+function endMeeting() {
+  const mode = meetingMode;
+  meetingActive = false; meetingPaused = false;
+  stopTimer(); stopWaveform();
+  if (demoTimeout) clearTimeout(demoTimeout);
+  removeInterim();
+  document.getElementById('meetingConfigArea').style.display = 'block';
+  document.getElementById('meetingRecordingArea').style.display = 'none';
+  document.getElementById('transcriptBox').innerHTML = '<div style="text-align:center;color:var(--outline);padding:20px;font-size:13px;" id="transcriptPlaceholder">🎤 等待语音输入...</div>';
+  document.getElementById('meetingConnBanner').classList.remove('show');
+  snackbar('✅ 会议已结束' + (mode === 'demo' ? ' — 摘要已生成' : ''));
+}
+
+function retryConnection() {
+  document.getElementById('meetingConnBanner').classList.remove('show');
+  snackbar('🔄 正在重连...');
+}
+
+function updateMeetingUI() {
+  const badge = document.getElementById('meetingModeBadge');
+  badge.className = 'meeting-badge';
+  if (meetingMode === 'demo') { badge.classList.add('demo'); badge.textContent = '● 演示模式'; }
+  else if (meetingMode === 'offline') { badge.classList.add('offline'); badge.textContent = '● 离线录音'; }
+  else { badge.classList.add('realtime'); badge.textContent = '● 实时转写'; }
+  document.getElementById('btnPause').innerHTML = meetingPaused ? '▶ 继续' : '⏸ 暂停';
+  if (meetingPaused) {
+    document.getElementById('meetingSpeakerInfo').textContent = '⏸ 已暂停';
+  }
+}
+
+// Timer
+function startTimer() {
+  document.getElementById('meetingTimer').textContent = '00:00:00';
+  meetingTimer = setInterval(() => {
+    if (!meetingPaused) meetingSec++;
+    const h = Math.floor(meetingSec/3600);
+    const m = Math.floor((meetingSec%3600)/60);
+    const s = meetingSec%60;
+    document.getElementById('meetingTimer').textContent = [h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
+  }, 1000);
+}
+
+function stopTimer() { clearInterval(meetingTimer); meetingTimer=null; meetingSec=0; }
+
+// Waveform
+function updateWaveform() {
+  const wf = document.getElementById('waveform');
+  if (!wf) return;
+  const pageActive = document.getElementById('page-meeting').classList.contains('active');
+  if (!pageActive || !meetingActive) {
+    let bars = '';
+    for (let i=0;i<36;i++) bars += '<div class="wave-bar" style="height:3px;"></div>';
+    wf.innerHTML = bars;
+    return;
+  }
+  let bars = '';
+  for (let i=0;i<36;i++) {
+    const base = meetingPaused ? 2 : (Math.sin(i*0.5 + Date.now()/200)*0.5+0.5);
+    const r = meetingPaused ? 0.15 : (0.4 + Math.random()*0.6);
+    const h = Math.max(2, base * r * 48);
+    const cls = h > 20 ? 'wave-bar hot' : (h > 10 ? 'wave-bar warm' : 'wave-bar');
+    bars += `<div class="${cls}" style="height:${h}px;"></div>`;
+  }
+  wf.innerHTML = bars;
+  if (meetingActive) waveInterval = requestAnimationFrame(() => setTimeout(updateWaveform, 100));
+}
+
+function startWaveform() { if (!waveInterval && meetingActive) updateWaveform(); }
+function stopWaveform() { if (waveInterval) { cancelAnimationFrame(waveInterval); waveInterval=null; } }
+// Init waveform on meeting page load
+setInterval(() => {
+  if (document.getElementById('page-meeting').classList.contains('active') && !meetingActive) updateWaveform();
+}, 500);
+
+// ════════════════ HISTORY ════════════════
+function renderHistory(filter='') {
+  const list = document.getElementById('historyList');
+  const data = HISTORY_DATA.filter(h => !filter || h.title.includes(filter) || h.tag.includes(filter));
+  if (data.length === 0) {
+    list.innerHTML = `<div class="empty-state">
+      <div class="es-icon">📭</div>
+      <div class="es-title">${filter ? '没有匹配的会议' : '暂无会议记录'}</div>
+      <div class="es-desc">${filter ? '换个关键词试试' : '开始你的第一场会议吧 🎙️'}</div>
+    </div>`;
+    return;
+  }
+  list.innerHTML = data.map(h => `
+    <div class="hist-item" onclick="openDetail(${h.id})">
+      <div class="hi-title">${h.title}</div>
+      <div class="hi-meta">
+        <span>📅 ${h.date}</span><span>⏱ ${h.dur}</span><span>👥 ${h.speakers} 人</span>
+      </div>
+      <span class="hi-tag ${h.tag}">${h.tag}</span>
+      <span class="hi-swipe-hint">›</span>
+    </div>
+  `).join('');
+}
+
+function filterHistory() {
+  renderHistory(document.getElementById('historySearch').value.trim());
+}
+
+function openDetail(id) {
+  const h = HISTORY_DATA.find(x => x.id === id);
+  if (!h) return;
+  document.getElementById('detailSheet').innerHTML = `
+    <div class="detail-handle"></div>
+    <h3>${h.title}</h3>
+    <div class="ds-meta">📅 ${h.date} &nbsp; ⏱ ${h.dur} &nbsp; 👥 ${h.speakers} 人 &nbsp; <span class="hi-tag ${h.tag}">${h.tag}</span></div>
+    <div class="ds-summary">
+      <h4>📝 AI 会议纪要</h4>
+      <div>${h.summary}</div>
+    </div>
+    <div class="ds-summary">
+      <h4>💬 转写片段</h4>
+      <div style="white-space:pre-wrap;">${h.transcript}</div>
+    </div>
+    <div class="detail-actions">
+      <button class="btn btn-tonal" onclick="snackbar('已导出 TXT 文件');closeDetail()">📄 导出 TXT</button>
+      <button class="btn btn-outlined" onclick="snackbar('已复制到剪贴板');closeDetail()">📋 复制全文</button>
+    </div>
+  `;
+  document.getElementById('detailOverlay').classList.add('open');
+  document.getElementById('mainContent').style.overflow = 'hidden';
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('open');
+  document.getElementById('mainContent').style.overflow = '';
+}
+
+// ════════════════ SNACKBAR ════════════════
+function snackbar(msg) {
+  const sb = document.getElementById('snackbar');
+  document.getElementById('snackMsg').textContent = msg;
+  sb.classList.add('show');
+  clearTimeout(sb._t);
+  sb._t = setTimeout(() => sb.classList.remove('show'), 2500);
+}
+
+function closeSnackbar() {
+  document.getElementById('snackbar').classList.remove('show');
+}
+
+// ════════════════ START ════════════════
+init();
+</script>
+</body>
+</html>

@@ -138,9 +138,6 @@ fun checkVolcengineKeys(): String? {
     ) {
         missing.add("API Key 或 Access Token")
     }
-    if (com.example.meetingtranscriber.BuildConfig.VOLCENGINE_ASR_RESOURCE_ID.isBlank()) {
-        missing.add("Resource ID")
-    }
     return if (missing.isEmpty()) null
     else "豆包 ASR 缺少: ${missing.joinToString("、")}"
 }

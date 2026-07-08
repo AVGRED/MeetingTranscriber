@@ -26,7 +26,7 @@ import java.util.zip.GZIPOutputStream
  * 火山引擎 / 豆包（Volcengine/Doubao）ASR Provider。
  *
  * 使用大模型流式 ASR（bigmodel）协议，通过二进制 WebSocket 帧与
- * wss://openspeech.bytedance.com/api/v3/sauc/bigmodel 通信。
+ * wss://openspeech.bytedance.com/api/v3/plan/sauc/bigmodel_async 通信。
  *
  * 认证：
  * - 优先使用 X-Api-Key 头（VOLCENGINE_ASR_API_KEY）
@@ -43,8 +43,9 @@ class VolcengineAsrProvider : AsrProvider {
         private const val TAG = "VolcengineAsrProvider"
 
         // ── 默认值 ──
-        private const val DEFAULT_RESOURCE_ID = "volc.seedasr.sauc.duration"
-        private const val DEFAULT_WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+        private const val DEFAULT_SEED_RESOURCE_ID = "volc.seedasr.sauc.duration"
+        private const val DEFAULT_LEGACY_RESOURCE_ID = "volc.bigasr.sauc.duration"
+        private const val DEFAULT_WS_URL = "wss://openspeech.bytedance.com/api/v3/plan/sauc/bigmodel_async"
 
         // ── 缓冲 ──
         private const val MAX_BUFFER_SIZE = 1200  // 约 120 秒 @ 100ms/帧
@@ -67,6 +68,15 @@ class VolcengineAsrProvider : AsrProvider {
         // ── 协议常量 ──
         private const val HEADER_SIZE = 4
         private const val PROTOCOL_VERSION: Byte = 0x01
+
+        private const val HEADER_STATUS_CODE = "X-Api-Status-Code"
+        private const val HEADER_MESSAGE = "X-Api-Message"
+        private const val HEADER_LOG_ID = "X-Tt-Logid"
+    }
+
+    private enum class AuthMode {
+        API_KEY,
+        LEGACY
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -82,11 +92,11 @@ class VolcengineAsrProvider : AsrProvider {
         get() = BuildConfig.VOLCENGINE_ASR_APP_ID.isNotBlank() &&
                 BuildConfig.VOLCENGINE_ASR_ACCESS_TOKEN.isNotBlank()
 
-    private val resourceId: String
-        get() = BuildConfig.VOLCENGINE_ASR_RESOURCE_ID.ifBlank { DEFAULT_RESOURCE_ID }
-
     private val wsUrl: String
         get() = BuildConfig.VOLCENGINE_ASR_WS_URL.ifBlank { DEFAULT_WS_URL }
+
+    private val preferredAuthMode: AuthMode
+        get() = if (apiKey.isNotBlank()) AuthMode.API_KEY else AuthMode.LEGACY
 
     // ═══════════════════════════════════════════════════════════
     // 状态
@@ -131,6 +141,23 @@ class VolcengineAsrProvider : AsrProvider {
         if (hasLegacyAuth) return null
         return "Volcengine 鉴权未配置" +
                 "（需设置 VOLCENGINE_ASR_API_KEY 或 VOLCENGINE_ASR_APP_ID + VOLCENGINE_ASR_ACCESS_TOKEN）"
+    }
+
+    private fun resourceIdFor(mode: AuthMode): String {
+        val configured = BuildConfig.VOLCENGINE_ASR_RESOURCE_ID
+        if (configured.isBlank()) {
+            return when (mode) {
+                AuthMode.API_KEY -> DEFAULT_SEED_RESOURCE_ID
+                AuthMode.LEGACY -> DEFAULT_LEGACY_RESOURCE_ID
+            }
+        }
+
+        return if (mode == AuthMode.LEGACY && configured == DEFAULT_SEED_RESOURCE_ID) {
+            Log.w(TAG, "旧版鉴权不使用 $configured，已切换为 $DEFAULT_LEGACY_RESOURCE_ID")
+            DEFAULT_LEGACY_RESOURCE_ID
+        } else {
+            configured
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -181,7 +208,7 @@ class VolcengineAsrProvider : AsrProvider {
         sentenceCounter = 0
 
         return try {
-            openWebSocket(config)
+            openWebSocket(config, preferredAuthMode)
             true
         } catch (e: Exception) {
             Log.e(TAG, "启动 Volcengine ASR 失败: ${e.message}")
@@ -194,34 +221,44 @@ class VolcengineAsrProvider : AsrProvider {
     // WebSocket 管理
     // ═══════════════════════════════════════════════════════════
 
-    private fun openWebSocket(config: AsrConfig) {
+    private fun openWebSocket(config: AsrConfig, authMode: AuthMode) {
         updateState(ConnectionState.CONNECTING)
 
         // 语言代码映射: "cn" → "zh-CN"（TODO: 验证 Volcengine 标准语言代码列表）
         val languageCode = if (config.language == "cn") "zh-CN" else config.language
+        val requestId = UUID.randomUUID().toString()
+        val selectedResourceId = resourceIdFor(authMode)
 
         val request = Request.Builder()
             .url(wsUrl)
             .apply {
-                // 新版：单 Key 鉴权；旧版：App Key + Access Key 双字段
-                if (apiKey.isNotBlank()) {
-                    header("X-Api-Key", apiKey)
-                } else {
-                    val appId = BuildConfig.VOLCENGINE_ASR_APP_ID
-                    val accessToken = BuildConfig.VOLCENGINE_ASR_ACCESS_TOKEN
-                    if (appId.isNotBlank()) header("X-Api-App-Key", appId)
-                    if (accessToken.isNotBlank()) header("X-Api-Access-Key", accessToken)
+                when (authMode) {
+                    AuthMode.API_KEY -> {
+                        header("X-Api-Key", apiKey)
+                    }
+                    AuthMode.LEGACY -> {
+                        val appId = BuildConfig.VOLCENGINE_ASR_APP_ID
+                        val accessToken = BuildConfig.VOLCENGINE_ASR_ACCESS_TOKEN
+                        if (appId.isNotBlank()) header("X-Api-App-Key", appId)
+                        if (accessToken.isNotBlank()) header("X-Api-Access-Key", accessToken)
+                    }
                 }
             }
-            .header("X-Api-Resource-Id", resourceId)
-            .header("X-Api-Request-Id", connectId)
+            .header("X-Api-Resource-Id", selectedResourceId)
+            .header("X-Api-Request-Id", requestId)
             .header("X-Api-Connect-Id", connectId)
+            .header("X-Api-Sequence", "-1")
             .build()
+
+        Log.i(
+            TAG,
+            "打开 WebSocket: auth=$authMode, resource=$selectedResourceId, url=$wsUrl, requestId=$requestId"
+        )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "WebSocket 已连接, status=${response.code}")
+                Log.i(TAG, "WebSocket 已连接, status=${response.code}, auth=$authMode")
                 updateState(ConnectionState.CONNECTED)
                 sendFullClientRequest(languageCode)
                 flushBuffer()
@@ -256,12 +293,35 @@ class VolcengineAsrProvider : AsrProvider {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket 失败: ${t.message}, response=${response?.code}")
+                val serverMessage = formatHandshakeFailure(response)
+                Log.e(TAG, "WebSocket 失败: ${t.message}, auth=$authMode, $serverMessage")
+
+                if (authMode == AuthMode.API_KEY && response?.code == 403 && hasLegacyAuth) {
+                    Log.w(TAG, "新版 API Key 被拒绝，尝试切换到旧版鉴权")
+                    openWebSocket(config, AuthMode.LEGACY)
+                    return
+                }
+
                 audioBuffer.clear()
                 updateState(ConnectionState.FAILED)
-                onError?.invoke("连接失败: ${t.message}")
+                onError?.invoke("连接失败: ${t.message}；$serverMessage")
             }
         })
+    }
+
+    private fun formatHandshakeFailure(response: Response?): String {
+        if (response == null) return "response=null"
+
+        val statusCode = response.header(HEADER_STATUS_CODE)
+        val message = response.header(HEADER_MESSAGE)
+        val logId = response.header(HEADER_LOG_ID)
+
+        return buildString {
+            append("response=${response.code}")
+            if (!statusCode.isNullOrBlank()) append(", $HEADER_STATUS_CODE=$statusCode")
+            if (!message.isNullOrBlank()) append(", $HEADER_MESSAGE=$message")
+            if (!logId.isNullOrBlank()) append(", $HEADER_LOG_ID=$logId")
+        }
     }
 
     /**
