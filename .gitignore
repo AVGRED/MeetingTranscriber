@@ -41,3 +41,4 @@ Thumbs.db
 # Build artifacts
 app/libs/
 app/src/main/assets/models/
+app/src/main/cpp/llama.cpp/
