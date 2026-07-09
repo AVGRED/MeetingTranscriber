@@ -42,7 +42,7 @@
         <!-- 离线录音按钮（未开会时显示） -->
         <Button
             android:id="@+id/btn_offline"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="离线"
@@ -52,7 +52,7 @@
         <!-- 演示按钮（未开会时显示） -->
         <Button
             android:id="@+id/btn_demo"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="演示"
@@ -62,7 +62,7 @@
         <!-- 暂停按钮（会议中显示） -->
         <Button
             android:id="@+id/btn_pause"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="暂停"
@@ -73,7 +73,7 @@
         <!-- 开始/结束按钮 -->
         <Button
             android:id="@+id/btn_start_end"
-            style="@style/Widget.MaterialComponents.Button"
+            style="@style/Widget.Material3.Button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="开始会议"
@@ -132,6 +132,18 @@
             android:dropDownVerticalOffset="48dp" />
     </LinearLayout>
 
+    <!-- 当前引擎标签 -->
+    <TextView
+        android:id="@+id/tv_engine_label"
+        android:layout_width="match_parent"
+        android:layout_height="20dp"
+        android:text="当前引擎：FunASR 云端"
+        android:textSize="11sp"
+        android:textColor="@color/on_surface_variant"
+        android:gravity="center"
+        android:background="@color/surface_variant"
+        app:layout_constraintTop_toBottomOf="@id/layout_title_input" />
+
     <!-- 演示模式提示条 -->
     <TextView
         android:id="@+id/tv_demo_badge"
@@ -143,7 +155,7 @@
         android:gravity="center"
         android:background="#FF9800"
         android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/layout_title_input"
+        app:layout_constraintTop_toBottomOf="@id/tv_engine_label"
         tools:visibility="visible" />
 
     <!-- 连接状态提示条（重连/失败时显示） -->
@@ -170,7 +182,7 @@
 
         <Button
             android:id="@+id/btn_retry"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:text="重试"
@@ -195,6 +207,16 @@
         app:layout_constraintTop_toBottomOf="@id/layout_connection_banner"
         tools:text="鉴权失败，请检查 AccessKey 配置。" />
 
+    <!-- 摘要生成进度 -->
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/progress_summary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:indeterminate="false"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tv_error"
+        tools:visibility="visible" />
+
     <!-- 转写列表 -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv_transcript"
@@ -202,7 +224,7 @@
         android:layout_height="0dp"
         android:padding="12dp"
         android:clipToPadding="false"
-        app:layout_constraintTop_toBottomOf="@id/tv_error"
+        app:layout_constraintTop_toBottomOf="@id/progress_summary"
         app:layout_constraintBottom_toBottomOf="parent"
         tools:listitem="@layout/item_transcript_segment" />
 

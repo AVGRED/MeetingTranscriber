@@ -105,22 +105,21 @@ class CloudSyncManager(private val context: Context) {
             )
             val newId = db.meetingDao().insert(entity)
 
-            for (seg in export.segments) {
-                db.transcriptDao().insert(
-                    com.example.meetingtranscriber.data.db.TranscriptEntity(
-                        meetingId = newId,
-                        speakerId = seg.speakerId,
-                        displaySpeaker = seg.displaySpeaker,
-                        text = seg.text,
-                        startTimeMs = seg.startTimeMs,
-                        endTimeMs = seg.endTimeMs,
-                        sentenceId = seg.sentenceId,
-                        isInterim = false,
-                        createdAt = seg.createdAt,
-                        topicId = seg.topicId
-                    )
+            val segmentEntities = export.segments.map { seg ->
+                com.example.meetingtranscriber.data.db.TranscriptEntity(
+                    meetingId = newId,
+                    speakerId = seg.speakerId,
+                    displaySpeaker = seg.displaySpeaker,
+                    text = seg.text,
+                    startTimeMs = seg.startTimeMs,
+                    endTimeMs = seg.endTimeMs,
+                    sentenceId = seg.sentenceId,
+                    isInterim = false,
+                    createdAt = seg.createdAt,
+                    topicId = seg.topicId
                 )
             }
+            db.transcriptDao().insertAll(segmentEntities)
 
             db.syncStateDao().upsert(
                 SyncStateEntity(meetingId = newId, lastSyncedAt = System.currentTimeMillis(), syncStatus = "synced")

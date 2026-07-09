@@ -22,7 +22,7 @@ import java.io.File
         VocabularyMeetingCrossRef::class,
         SyncStateEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -39,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
+        @Volatile private var migrationAttempted = false
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -127,25 +128,36 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE meetings ADD COLUMN asrEngineType TEXT")
+                db.execSQL("ALTER TABLE meetings ADD COLUMN llmEngineType TEXT")
+                db.execSQL("ALTER TABLE meetings ADD COLUMN dialectUsed TEXT")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
-            return INSTANCE ?: synchronized(this) {
+            INSTANCE?.let { return it }
+            // 迁移必须在 synchronized 块外执行，因为 migratePlaintextIfNeeded 使用 runBlocking
+            // 如果在 synchronized 内调用 runBlocking，DAO 操作可能触发同一把锁 → 死锁
+            // migrationAttempted 标志防止多线程重复执行
+            if (!migrationAttempted && CryptoManager.isEncryptionEnabled()) {
+                migratePlaintextIfNeeded(context, context.getDatabasePath(DB_NAME))
+                migrationAttempted = true
+            }
+            return synchronized(this) {
                 INSTANCE ?: buildDatabase(context).also { INSTANCE = it }
             }
         }
 
         private fun buildDatabase(context: Context): AppDatabase {
-            val dbFile = context.getDatabasePath(DB_NAME)
             val useEncryption = CryptoManager.isEncryptionEnabled()
-
-            if (useEncryption) {
-                migratePlaintextIfNeeded(context, dbFile)
-            }
 
             val builder = Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 DB_NAME
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
 
             if (useEncryption) {
                 val passphrase = CryptoManager.getDatabasePassphrase()
@@ -229,7 +241,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     DB_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .openHelperFactory(factory)
                     .build()
 
@@ -292,7 +304,10 @@ abstract class AppDatabase : RoomDatabase() {
                 segmentCount = row["segmentCount"]?.toIntOrNull() ?: 0,
                 summary = row["summary"],
                 isOffline = (row["isOffline"]?.toIntOrNull() ?: 0) != 0,
-                audioFilePath = row["audioFilePath"]
+                audioFilePath = row["audioFilePath"],
+                asrEngineType = row["asrEngineType"],
+                llmEngineType = row["llmEngineType"],
+                dialectUsed = row["dialectUsed"]
             )
         }
 

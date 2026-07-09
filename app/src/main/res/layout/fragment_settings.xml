@@ -7,7 +7,7 @@
     android:orientation="vertical"
     android:background="@color/background">
 
-    <!-- ASR 提供商选择 -->
+    <!-- 摘要风格选择 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -23,19 +23,65 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="语音识别引擎"
+            android:text="摘要风格"
             android:textSize="14sp"
             android:textColor="@color/on_background" />
 
         <Spinner
-            android:id="@+id/spinner_asr_provider"
+            android:id="@+id/spinner_summary_style"
             android:layout_width="160dp"
             android:layout_height="40dp"
             android:background="@drawable/search_bg"
             android:paddingHorizontal="8dp" />
     </LinearLayout>
 
+    <!-- 清除模型缓存 -->
     <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:gravity="center_vertical"
+        android:background="@color/surface"
+        android:layout_marginBottom="1dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="本地模型缓存"
+                android:textSize="14sp"
+                android:textColor="@color/on_background" />
+
+            <TextView
+                android:id="@+id/tv_model_size"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="@color/interim_text"
+                android:layout_marginTop="2dp"
+                android:text="加载中..." />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btn_clear_model"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="清除"
+            android:textSize="12sp"
+            android:textColor="@color/accent" />
+    </LinearLayout>
+
+    <!-- ===== 旧 ASR 提供商选择（已移除，迁移至 API 配置页） ===== -->
+
+<LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -56,7 +102,7 @@
 
         <Button
             android:id="@+id/btn_add_vocabulary"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="新建"
@@ -64,7 +110,7 @@
 
         <Button
             android:id="@+id/btn_import_vocabulary"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="导入"
@@ -98,7 +144,7 @@
             android:textColor="@color/interim_text"
             android:layout_marginEnd="12dp" />
 
-        <com.google.android.material.switchmaterial.SwitchMaterial
+        <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switch_background"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content" />
@@ -137,7 +183,7 @@
 
         <Button
             android:id="@+id/btn_sync_export"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="导出"
@@ -146,7 +192,7 @@
 
         <Button
             android:id="@+id/btn_sync_import"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="导入"
@@ -190,7 +236,7 @@
 
         <Button
             android:id="@+id/btn_check_update"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="检查更新"
@@ -235,7 +281,7 @@
 
         <Button
             android:id="@+id/btn_cleanup"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="清理旧录音"

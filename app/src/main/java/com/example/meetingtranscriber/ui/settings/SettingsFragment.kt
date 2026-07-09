@@ -16,11 +16,10 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.meetingtranscriber.data.db.VocabularyEntity
 import com.example.meetingtranscriber.databinding.FragmentSettingsBinding
-import com.example.meetingtranscriber.network.AsrProviderType
+import com.example.meetingtranscriber.engine.SummaryStyle
+import com.example.meetingtranscriber.engine.llm.ModelDownloadManager
 import com.example.meetingtranscriber.network.CloudSyncManager
 import com.example.meetingtranscriber.network.UpdateChecker
-import com.example.meetingtranscriber.network.checkTingwuKeys
-import com.example.meetingtranscriber.network.checkVolcengineKeys
 import com.example.meetingtranscriber.util.StorageMonitor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -44,8 +43,30 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // ── ASR 提供商选择 ──
-        setupProviderSpinner()
+        // ── 摘要风格选择 ──
+        setupSummaryStyleSpinner()
+
+        // ── 模型缓存信息 ──
+        updateModelSize()
+        binding.btnClearModel.setOnClickListener {
+            val manager = ModelDownloadManager(requireContext())
+            if (manager.isModelDownloaded()) {
+                AlertDialog.Builder(requireContext())
+                    .setTitle("清除模型缓存")
+                    .setMessage("删除本地 Qwen LLM 模型（约 1.1GB），再次使用时需重新下载。确定继续？")
+                    .setPositiveButton("清除") { _, _ ->
+                        val deleted = manager.deleteModel()
+                        Toast.makeText(requireContext(),
+                            if (deleted) "模型已清除" else "清除失败",
+                            Toast.LENGTH_SHORT).show()
+                        updateModelSize()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            } else {
+                Toast.makeText(requireContext(), "没有已下载的模型", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         adapter = VocabularyAdapter(
             onDelete = { vocab -> showDeleteConfirm(vocab) }
@@ -243,17 +264,18 @@ class SettingsFragment : Fragment() {
         binding.btnCleanup.isEnabled = status.recordingsSizeMb > 0
     }
 
-    /** 绑定 ASR 提供商 Spinner：选择 → 存 SharedPrefs → 校验密钥 → Toast */
-    private fun setupProviderSpinner() {
-        val spinner = binding.spinnerAsrProvider
-        val types = AsrProviderType.entries.toList()
-        val labels = types.map { it.displayName }
+    /** 绑定摘要风格 Spinner */
+    private fun setupSummaryStyleSpinner() {
+        val spinner = binding.spinnerSummaryStyle
+        val styles = SummaryStyle.entries.toList()
+        val labels = styles.map { it.label }
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, labels)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
 
-        val current = AsrProviderType.fromPrefs(requireContext())
-        spinner.setSelection(types.indexOf(current), false)
+        val prefs = com.example.meetingtranscriber.PreferencesManager(requireContext())
+        val current = prefs.summaryStyle
+        spinner.setSelection(styles.indexOf(current), false)
 
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             private var isInitialSelection = true
@@ -261,22 +283,26 @@ class SettingsFragment : Fragment() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
                 if (isInitialSelection) {
                     isInitialSelection = false
-                    return  // 跳过 setSelection 触发的初始化回调
+                    return
                 }
-                val selected = types[pos]
-                AsrProviderType.saveToPrefs(requireContext(), selected)
-                val msg = when (selected) {
-                    AsrProviderType.TINGWU -> checkTingwuKeys()
-                    AsrProviderType.VOLCENGINE -> checkVolcengineKeys()
-                }
-                if (msg != null) {
-                    Toast.makeText(requireContext(), "⚠️ $msg\n请在 gradle-local.properties 中配置", Toast.LENGTH_LONG).show()
-                } else {
-                    Toast.makeText(requireContext(), "已切换至 ${selected.displayName}", Toast.LENGTH_SHORT).show()
-                }
+                prefs.summaryStyle = styles[pos]
+                Toast.makeText(requireContext(), "已切换至 ${styles[pos].label}", Toast.LENGTH_SHORT).show()
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    /** 更新模型缓存大小显示 */
+    private fun updateModelSize() {
+        val manager = ModelDownloadManager(requireContext())
+        if (manager.isModelDownloaded()) {
+            val sizeMB = manager.modelFile.length() / (1024 * 1024)
+            binding.tvModelSize.text = "Qwen 模型已下载 · ${sizeMB}MB"
+            binding.btnClearModel.isEnabled = true
+        } else {
+            binding.tvModelSize.text = "无已下载的模型"
+            binding.btnClearModel.isEnabled = false
         }
     }
 

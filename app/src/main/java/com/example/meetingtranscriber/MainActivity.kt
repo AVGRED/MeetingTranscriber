@@ -8,7 +8,10 @@ import androidx.lifecycle.lifecycleScope
 import com.example.meetingtranscriber.data.db.AppDatabase
 import com.example.meetingtranscriber.data.db.RecoveryStateEntity
 import com.example.meetingtranscriber.databinding.ActivityMainBinding
+import com.example.meetingtranscriber.ui.apiconfig.ApiConfigFragment
+import com.example.meetingtranscriber.ui.detail.DetailFragment
 import com.example.meetingtranscriber.ui.history.HistoryFragment
+import com.example.meetingtranscriber.ui.home.HomeFragment
 import com.example.meetingtranscriber.ui.meeting.MeetingFragment
 import com.example.meetingtranscriber.ui.settings.SettingsFragment
 import kotlinx.coroutines.launch
@@ -23,11 +26,19 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         if (savedInstanceState == null) {
-            showFragment(MeetingFragment(), "meeting")
+            showFragment(HomeFragment(), "home")
         }
 
         binding.bottomNavigation.setOnItemSelectedListener { item ->
             when (item.itemId) {
+                R.id.nav_home -> {
+                    showFragment(HomeFragment(), "home")
+                    true
+                }
+                R.id.nav_api_config -> {
+                    showFragment(ApiConfigFragment(), "api_config")
+                    true
+                }
                 R.id.nav_meeting -> {
                     showFragment(MeetingFragment(), "meeting")
                     true
@@ -50,6 +61,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** 跳转到指定 tab */
+    fun navigateToTab(tabId: Int) {
+        binding.bottomNavigation.selectedItemId = tabId
+    }
+
+    /** 跳转到 Meeting tab 并启动指定模式 */
+    fun navigateToMeeting(mode: String) {
+        binding.bottomNavigation.selectedItemId = R.id.nav_meeting
+        binding.root.post {
+            val frag = supportFragmentManager.findFragmentByTag("meeting") as? MeetingFragment
+            when (mode) {
+                "realtime" -> frag?.startRealMeeting()
+                "offline" -> frag?.startOfflineMeeting()
+                "demo" -> frag?.startDemo()
+            }
+        }
+    }
+
+    /** 跳转到历史 tab 并打开会议详情 */
+    fun navigateToMeetingDetail(meetingId: Long) {
+        binding.bottomNavigation.selectedItemId = R.id.nav_history
+        binding.root.post {
+            val detail = DetailFragment.newInstance(meetingId)
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, detail, "detail")
+                .addToBackStack(null)
+                .commit()
+        }
+    }
+
     private fun showRecoveryDialog(state: RecoveryStateEntity) {
         AlertDialog.Builder(this)
             .setTitle("检测到未正常结束的会议")
@@ -59,7 +100,6 @@ class MainActivity : AppCompatActivity() {
                 binding.bottomNavigation.selectedItemId = R.id.nav_meeting
                 val meetingFrag = MeetingFragment()
                 showFragment(meetingFrag, "meeting")
-                // post 等待 fragment 事务提交后再触发恢复
                 binding.root.post {
                     val activeFrag = supportFragmentManager.findFragmentByTag("meeting") as? MeetingFragment
                     activeFrag?.recoverFromCrash(state)

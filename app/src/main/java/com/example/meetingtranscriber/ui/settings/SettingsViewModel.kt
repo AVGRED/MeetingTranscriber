@@ -33,8 +33,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 val count = vocabDao.getWordCount(id)
                 vocabDao.updateVocabularyCloudInfo(id, "", count)
             }
-            // 异步上传到云端
-            uploadVocabulary(id, name, words)
+            // 异步上传到云端（fire-and-forget，不阻塞 UI）
+            launch { uploadVocabulary(id, name, words) }
         }
     }
 
@@ -46,7 +46,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             vocabDao.insertWords(wordEntities)
             val count = vocabDao.getWordCount(id)
             vocabDao.updateVocabularyCloudInfo(id, "", count)
-            uploadVocabulary(id, name, words)
+            launch { uploadVocabulary(id, name, words) }
         }
     }
 

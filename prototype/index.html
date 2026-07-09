@@ -37,9 +37,18 @@
   }
 
   .phone-frame {
-    width:390px; height:844px; background:var(--surface); border-radius:40px;
+    width:960px; height:540px; background:var(--surface); border-radius:24px;
     overflow:hidden; display:flex; flex-direction:column; position:relative;
-    box-shadow: 0 0 0 8px #161618, 0 0 0 10px #2a2a2e, 0 20px 60px rgba(0,0,0,0.5);
+    box-shadow: 0 0 0 2px #2a2a2e, 0 20px 60px rgba(0,0,0,0.5);
+  }
+
+  /* ── Home: two-column layout ── */
+  .home-cols { display:flex; gap:16px; }
+  .home-cols .section-card { flex:1; min-width:0; }
+  .home-full { margin-top:12px; }
+  @media (max-width:980px) {
+    .phone-frame { width:100vw; height:56.25vw; max-height:100vh; border-radius:0; }
+    .home-cols { flex-direction:column; }
   }
 
   /* Status bar */
@@ -309,6 +318,21 @@
   }
   .countdown-num { font-size:80px; font-weight:200; color:#FFF; }
 
+  /* ── 16:9 wider layouts ── */
+  .history-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .settings-cols { display:flex; gap:16px; }
+  .settings-cols .section-card { flex:1; min-width:0; }
+  .meeting-split { display:flex; gap:16px; }
+  .meeting-split > div:first-child { flex:0 0 360px; }
+  .meeting-split > div:last-child { flex:1; min-width:0; }
+  .detail-sheet-wide { max-width:640px; left:50% !important; transform:translateX(-50%) !important; border-radius:28px 28px 0 0 !important; }
+  @media (max-width:980px) {
+    .history-grid { grid-template-columns:1fr; }
+    .settings-cols { flex-direction:column; }
+    .meeting-split { flex-direction:column; }
+    .meeting-split > div:first-child { flex:auto; }
+  }
+
   /* ═══════════════ HISTORY PAGE ═══════════════ */
   .search-bar {
     display:flex; align-items:center; gap:8px; background:var(--surface-container-high);
@@ -442,8 +466,78 @@
 
   <div class="main-content" id="mainContent">
 
-    <!-- ═══════════ HOME ═══════════ -->
+    <!-- ═══════════ HOME (Dashboard) ═══════════ -->
     <div class="page active" id="page-home">
+      <!-- Greeting -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:28px;font-weight:700;color:#1C1B1F;" id="greetingText">下午好</div>
+        <div style="font-size:13px;color:var(--outline);margin-top:2px;" id="dateText">2026年7月8日 星期三</div>
+      </div>
+
+      <!-- Status overview -->
+      <div class="home-cols" style="margin-bottom:12px;">
+        <div class="section-card interactive" onclick="switchTab('api', document.querySelector('[data-tab=api]'))">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:44px;height:44px;border-radius:12px;background:var(--primary-container);display:flex;align-items:center;justify-content:center;font-size:20px;">🎤</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;color:var(--outline);">语音引擎</div>
+              <div style="font-size:15px;font-weight:600;color:#1C1B1F;"><span id="homeAsrName">通义听悟</span></div>
+            </div>
+            <div style="width:10px;height:10px;border-radius:50%;" id="homeAsrDot" class="c-status missing"></div>
+          </div>
+        </div>
+        <div class="section-card interactive" onclick="switchTab('api', document.querySelector('[data-tab=api]'))">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:44px;height:44px;border-radius:12px;background:var(--tertiary-container);display:flex;align-items:center;justify-content:center;font-size:20px;">🤖</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;color:var(--outline);">AI 摘要</div>
+              <div style="font-size:15px;font-weight:600;color:#1C1B1F;"><span id="homeLlmName">未配置</span></div>
+            </div>
+            <div style="width:10px;height:10px;border-radius:50%;" id="homeLlmDot" class="c-status missing"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Start -->
+      <div class="section-card" style="text-align:center;padding:20px;">
+        <div style="font-size:40px;margin-bottom:8px;">🎙️</div>
+        <div style="font-size:18px;font-weight:700;color:#1C1B1F;margin-bottom:4px;">开始新会议</div>
+        <div style="font-size:12px;color:var(--outline);margin-bottom:16px;">选择实时转写、离线录音或演示模式</div>
+        <div class="btn-row">
+          <button class="btn btn-filled btn-lg" onclick="switchTab('meeting', document.querySelector('[data-tab=meeting]'))" style="flex:2;">▶ 实时会议</button>
+          <button class="btn btn-tonal" onclick="switchTabToMeeting('offline')">📴 离线</button>
+          <button class="btn btn-outlined" onclick="switchTabToMeeting('demo')">🎬 演示</button>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="home-cols" style="margin-top:12px;">
+        <div class="section-card" style="text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--primary);">4</div>
+          <div style="font-size:11px;color:var(--outline);">场会议</div>
+        </div>
+        <div class="section-card" style="text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--primary);">173</div>
+          <div style="font-size:11px;color:var(--outline);">分钟录音</div>
+        </div>
+        <div class="section-card" style="text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--success);">8.6</div>
+          <div style="font-size:11px;color:var(--outline);">GB 可用</div>
+        </div>
+      </div>
+
+      <!-- Recent meetings -->
+      <div style="margin-top:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span style="font-size:13px;font-weight:600;color:var(--secondary);">📋 最近会议</span>
+          <button class="btn btn-sm btn-outlined" onclick="switchTab('history', document.querySelector('[data-tab=history]'))">查看全部 →</button>
+        </div>
+        <div id="homeRecentList"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════ API CONFIG ═══════════ -->
+    <div class="page" id="page-api">
 
       <!-- Config summary -->
       <div class="config-summary">
@@ -464,6 +558,7 @@
         </div>
       </div>
 
+      <div class="home-cols">
       <!-- ASR Section -->
       <div class="section-card" id="asrSection">
         <div class="section-label"><span class="s-icon">🎤</span> 语音识别引擎</div>
@@ -543,6 +638,7 @@
           <button class="btn btn-outlined danger btn-sm" onclick="clearLlmKeys()">清除</button>
         </div>
       </div>
+      </div><!-- /home-cols -->
 
       <div style="text-align:center;color:var(--outline);font-size:11px;padding:4px 0 8px;">
         🔒 所有密钥加密存储于本地 · 仅用于 API 调用
@@ -606,23 +702,26 @@
           <button class="btn btn-sm btn-outlined" id="meetingRetryBtn" onclick="retryConnection()" style="display:none;">重试</button>
         </div>
 
-        <div class="meeting-hero">
-          <div class="meeting-badge realtime" id="meetingModeBadge">● 实时转写</div>
-          <div class="meeting-timer" id="meetingTimer">00:00:00</div>
-          <div class="meeting-subtitle" id="meetingSpeakerInfo">等待语音...</div>
-        </div>
-
-        <div class="waveform" id="waveform"></div>
-
-        <div class="transcript-panel" id="transcriptBox">
-          <div style="text-align:center;color:var(--outline);padding:20px;font-size:13px;" id="transcriptPlaceholder">
-            🎤 等待语音输入...
+        <div class="meeting-split">
+        <div>
+          <div class="meeting-hero">
+            <div class="meeting-badge realtime" id="meetingModeBadge">● 实时转写</div>
+            <div class="meeting-timer" id="meetingTimer">00:00:00</div>
+            <div class="meeting-subtitle" id="meetingSpeakerInfo">等待语音...</div>
+          </div>
+          <div class="waveform" id="waveform"></div>
+          <div class="meeting-ctrls">
+            <button class="btn btn-outlined" id="btnPause" onclick="togglePause()">⏸ 暂停</button>
+            <button class="btn btn-filled" id="btnEnd" onclick="endMeeting()">⏹ 结束会议</button>
           </div>
         </div>
-
-        <div class="meeting-ctrls">
-          <button class="btn btn-outlined" id="btnPause" onclick="togglePause()">⏸ 暂停</button>
-          <button class="btn btn-filled" id="btnEnd" onclick="endMeeting()">⏹ 结束会议</button>
+        <div>
+          <div class="transcript-panel" id="transcriptBox" style="max-height:300px;">
+            <div style="text-align:center;color:var(--outline);padding:20px;font-size:13px;" id="transcriptPlaceholder">
+              🎤 等待语音输入...
+            </div>
+          </div>
+        </div>
         </div>
       </div>
     </div>
@@ -633,11 +732,13 @@
         <span class="search-icon">🔍</span>
         <input type="text" placeholder="搜索会议..." id="historySearch" oninput="filterHistory()">
       </div>
-      <div id="historyList"></div>
+      <div id="historyList" class="history-grid"></div>
     </div>
 
     <!-- ═══════════ SETTINGS ═══════════ -->
     <div class="page" id="page-settings">
+      <div class="settings-cols">
+      <div style="flex:1;min-width:0;">
       <div class="section-card">
         <div class="section-label"><span class="s-icon">💡</span> 通用</div>
         <div class="setting-item">
@@ -672,7 +773,9 @@
           <button class="btn btn-outlined btn-sm" onclick="snackbar('请选择要导入的文件')">📥 导入备份</button>
         </div>
       </div>
+      </div>
 
+      <div style="flex:1;min-width:0;">
       <div class="section-card">
         <div class="section-label"><span class="s-icon">💾</span> 存储空间</div>
         <div style="display:flex;justify-content:space-between;font-size:13px;color:#1C1B1F;">
@@ -691,6 +794,8 @@
           <div class="si-label">数据统计</div><div style="color:var(--outline);font-size:13px;">4 场会议 · 173 分钟</div>
         </div>
       </div>
+      </div>
+      </div>
     </div>
   </div>
 
@@ -698,6 +803,9 @@
   <div class="bottom-nav">
     <button class="nav-item active" onclick="switchTab('home', this)" data-tab="home">
       <span class="nav-icon">🏠</span><span class="nav-label">首页</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('api', this)" data-tab="api">
+      <span class="nav-icon">🔌</span><span class="nav-label">API</span>
     </button>
     <button class="nav-item" onclick="switchTab('meeting', this)" data-tab="meeting">
       <span class="nav-icon">🎙️</span><span class="nav-label">会议</span>
@@ -908,7 +1016,8 @@ function switchTab(name, btn) {
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   const titles = {
-    home:'<span class="title-emoji">🎙️</span><span class="title-text">MeetingTranscriber</span>',
+    home:'<span class="title-emoji">🏠</span><span class="title-text">MeetingTranscriber</span>',
+    api:'<span class="title-emoji">🔌</span><span class="title-text">API 接入</span>',
     meeting:'<span class="title-emoji">🎙️</span><span class="title-text">会议</span>',
     history:'<span class="title-emoji">📋</span><span class="title-text">会议历史</span>',
     settings:'<span class="title-emoji">⚙️</span><span class="title-text">设置</span>'
@@ -917,11 +1026,18 @@ function switchTab(name, btn) {
   document.getElementById('mainContent').scrollTop = 0;
   if (name === 'meeting') startWaveform();
   else stopWaveform();
+  if (name === 'home') updateHomeDashboard();
   // Refresh meeting engine label
   if (name === 'meeting') {
     const p = ASR_PROVIDERS.find(x => x.key === currentAsr);
     document.getElementById('meetingEngineLabel').textContent = p ? p.name : '通义听悟';
   }
+}
+
+function switchTabToMeeting(mode) {
+  switchTab('meeting', document.querySelector('[data-tab=meeting]'));
+  if (mode === 'offline') startOfflineMeeting();
+  else if (mode === 'demo') startDemoMeeting();
 }
 
 // ════════════════ ASR PROVIDER ════════════════
@@ -1310,7 +1426,9 @@ function filterHistory() {
 function openDetail(id) {
   const h = HISTORY_DATA.find(x => x.id === id);
   if (!h) return;
-  document.getElementById('detailSheet').innerHTML = `
+  const sheet = document.getElementById('detailSheet');
+  sheet.className = 'detail-sheet detail-sheet-wide';
+  sheet.innerHTML = `
     <div class="detail-handle"></div>
     <h3>${h.title}</h3>
     <div class="ds-meta">📅 ${h.date} &nbsp; ⏱ ${h.dur} &nbsp; 👥 ${h.speakers} 人 &nbsp; <span class="hi-tag ${h.tag}">${h.tag}</span></div>
@@ -1333,6 +1451,7 @@ function openDetail(id) {
 
 function closeDetail() {
   document.getElementById('detailOverlay').classList.remove('open');
+  document.getElementById('detailSheet').className = 'detail-sheet';
   document.getElementById('mainContent').style.overflow = '';
 }
 
@@ -1349,8 +1468,66 @@ function closeSnackbar() {
   document.getElementById('snackbar').classList.remove('show');
 }
 
+// ════════════════ HOME DASHBOARD ════════════════
+function updateHomeDashboard() {
+  // Greeting
+  const h = new Date().getHours();
+  const greet = h < 6 ? '凌晨好' : h < 12 ? '上午好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好';
+  document.getElementById('greetingText').textContent = greet + ' 👋';
+  // Date
+  const days = ['日','一','二','三','四','五','六'];
+  const d = new Date();
+  document.getElementById('dateText').textContent =
+    d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日 星期' + days[d.getDay()];
+
+  // ASR status
+  const p = ASR_PROVIDERS.find(x => x.key === currentAsr);
+  document.getElementById('homeAsrName').textContent = p ? p.name : '通义听悟';
+  const missing = getAsrMissing();
+  const ad = document.getElementById('homeAsrDot');
+  ad.className = ''; ad.style.width='10px';ad.style.height='10px';ad.style.borderRadius='50%';ad.style.display='inline-block';
+  ad.style.background = missing.length===0 ? 'var(--warning)' : 'var(--error)';
+
+  // LLM status
+  const model = document.getElementById('llmModelSelect').value;
+  const key = document.getElementById('llmApiKey').value.trim();
+  const sel = document.getElementById('llmModelSelect');
+  document.getElementById('homeLlmName').textContent = model==='local' ? '本地规则' :
+    (key ? (sel.options[sel.selectedIndex]?.text || '已配置') : '未配置');
+  const ld = document.getElementById('homeLlmDot');
+  ld.className = ''; ld.style.width='10px';ld.style.height='10px';ld.style.borderRadius='50%';ld.style.display='inline-block';
+  ld.style.background = (model==='local'||key) ? 'var(--warning)' : 'var(--error)';
+
+  // Recent meetings
+  renderHomeRecent();
+}
+
+function renderHomeRecent() {
+  const list = document.getElementById('homeRecentList');
+  const recent = HISTORY_DATA.slice(0, 2);
+  list.innerHTML = recent.map(h => `
+    <div class="section-card interactive" onclick="switchTab('history', document.querySelector('[data-tab=history]'));setTimeout(()=>openDetail(${h.id}),300)" style="margin-bottom:8px;padding:12px 14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:#1C1B1F;">${h.title}</div>
+          <div style="font-size:11px;color:var(--outline);margin-top:2px;">📅 ${h.date} · ⏱ ${h.dur} · 👥 ${h.speakers} 人</div>
+        </div>
+        <span class="hi-tag ${h.tag}" style="flex-shrink:0;">${h.tag}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Also update home when config changes
+const _origUpdateConfigSummary = updateConfigSummary;
+updateConfigSummary = function() {
+  _origUpdateConfigSummary();
+  updateHomeDashboard();
+};
+
 // ════════════════ START ════════════════
 init();
+updateHomeDashboard();
 </script>
 </body>
 </html>

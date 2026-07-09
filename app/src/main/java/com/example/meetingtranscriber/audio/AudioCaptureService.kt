@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.meetingtranscriber.PreferencesManager
 import com.example.meetingtranscriber.MainActivity
 import com.example.meetingtranscriber.MeetingApplication
 import com.example.meetingtranscriber.R
@@ -46,7 +47,7 @@ class AudioCaptureService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val isSilent = getSharedPreferences("meeting_prefs", MODE_PRIVATE)
+        val isSilent = getSharedPreferences(PreferencesManager.PLAIN_PREFS_NAME, MODE_PRIVATE)
             .getBoolean("background_silent", false)
         val priority = if (isSilent) NotificationCompat.PRIORITY_MIN else NotificationCompat.PRIORITY_LOW
 

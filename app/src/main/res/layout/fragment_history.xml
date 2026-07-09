@@ -29,12 +29,39 @@
 
         <Button
             android:id="@+id/btn_recycle_bin"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="回收站"
             android:textColor="@color/accent"
             android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- 搜索栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:background="@color/surface">
+
+        <EditText
+            android:id="@+id/et_search"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/search_bg"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:textSize="14sp"
+            android:hint="搜索会议标题..."
+            android:maxLength="50"
+            android:drawableStart="@drawable/ic_search"
+            android:drawablePadding="8dp"
+            android:imeOptions="actionSearch" />
     </LinearLayout>
 
     <!-- 标签筛选 -->

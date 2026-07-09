@@ -18,5 +18,9 @@ data class MeetingEntity(
     val audioFilePath: String? = null,
     val isArchived: Boolean = false,
     val archivedAt: Long? = null,
-    val tag: String? = null
+    val tag: String? = null,
+    // v8: 引擎追踪
+    val asrEngineType: String? = null,
+    val llmEngineType: String? = null,
+    val dialectUsed: String? = null
 )

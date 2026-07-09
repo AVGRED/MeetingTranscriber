@@ -113,7 +113,7 @@ class AudioCaptureManager {
         isCapturing.set(false)
         captureJob?.cancel()
         captureJob = null
-        scope.coroutineContext.cancelChildren()
+        scope.coroutineContext[Job]?.cancelChildren()
         try {
             audioRecord?.stop()
             audioRecord?.release()

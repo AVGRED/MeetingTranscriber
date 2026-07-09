@@ -18,6 +18,9 @@ interface MeetingDao {
     @Query("SELECT * FROM meetings WHERE isArchived = 0 ORDER BY startTime DESC")
     fun getAllMeetings(): Flow<List<MeetingEntity>>
 
+    @Query("SELECT * FROM meetings WHERE isArchived = 0 ORDER BY startTime DESC")
+    suspend fun getAllMeetingsOnce(): List<MeetingEntity>
+
     @Query("SELECT * FROM meetings WHERE id = :meetingId")
     suspend fun getById(meetingId: Long): MeetingEntity?
 

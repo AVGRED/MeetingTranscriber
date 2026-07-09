@@ -29,6 +29,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
 
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
         // 阿里云通义听悟配置 (BuildConfig 常量)
         buildConfigField("String", "ALIYUN_ACCESS_KEY_ID", "\"${secret("ALIYUN_ACCESS_KEY_ID")}\"")
         buildConfigField("String", "ALIYUN_ACCESS_KEY_SECRET", "\"${secret("ALIYUN_ACCESS_KEY_SECRET")}\"")
@@ -36,14 +40,7 @@ android {
         // DashScope / 通义千问 LLM 摘要 (Phase 2 启用)
         buildConfigField("String", "DASHSCOPE_API_KEY", "\"${secret("DASHSCOPE_API_KEY")}\"")
 
-        // 火山引擎 / 豆包配置。密钥放在 gradle-local.properties，不提交到 git。
-        buildConfigField("String", "VOLCENGINE_ASR_APP_ID", "\"${secret("VOLCENGINE_ASR_APP_ID")}\"")
-        buildConfigField("String", "VOLCENGINE_ASR_API_KEY", "\"${secret("VOLCENGINE_ASR_API_KEY")}\"")
-        buildConfigField("String", "VOLCENGINE_ASR_ACCESS_TOKEN", "\"${secret("VOLCENGINE_ASR_ACCESS_TOKEN")}\"")
-        buildConfigField("String", "VOLCENGINE_ASR_SECRET_KEY", "\"${secret("VOLCENGINE_ASR_SECRET_KEY")}\"")
-        buildConfigField("String", "VOLCENGINE_ASR_CLUSTER", "\"${secret("VOLCENGINE_ASR_CLUSTER")}\"")
-        buildConfigField("String", "VOLCENGINE_ASR_RESOURCE_ID", "\"${secret("VOLCENGINE_ASR_RESOURCE_ID")}\"")
-        buildConfigField("String", "VOLCENGINE_ASR_WS_URL", "\"${secret("VOLCENGINE_ASR_WS_URL")}\"")
+        // 火山方舟 / 豆包 LLM 配置（Deprecated fallback 仍需要）
         buildConfigField("String", "ARK_API_KEY", "\"${secret("ARK_API_KEY")}\"")
         // 火山方舟推理端点 ID（如 ep-20250101123456-xxxxx）或模型名。优先使用此字段。
         buildConfigField("String", "ARK_ENDPOINT_ID", "\"${secret("ARK_ENDPOINT_ID")}\"")
@@ -75,6 +72,21 @@ android {
         buildConfig = true
         viewBinding = true
     }
+
+    // 禁止压缩 .onnx 模型文件（sherpa-onnx 需要）
+    aaptOptions {
+        noCompress("onnx")
+    }
+
+    // === llama.cpp JNI NDK 编译 ===
+    // 依赖: cpp/llama.cpp (已 clone)
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+    ndkVersion = "27.0.12077973"
 }
 
 dependencies {
@@ -103,6 +115,9 @@ dependencies {
     // --- 网络 ---
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+    // --- 离线语音识别 (sherpa-onnx / FunASR SenseVoiceSmall) ---
+    implementation(files("libs/sherpa-onnx-1.12.29.aar"))
 
     // --- JSON ---
     implementation("com.google.code.gson:gson:2.11.0")

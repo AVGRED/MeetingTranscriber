@@ -81,6 +81,10 @@ class MeetingRepository(private val db: AppDatabase) {
         }
     }
 
+    suspend fun getAllMeetingsOnce(): List<MeetingInfo> {
+        return meetingDao.getAllMeetingsOnce().map { it.toInfo() }
+    }
+
     fun getMeetingsByTag(tag: String): Flow<List<MeetingInfo>> {
         return meetingDao.getMeetingsByTag(tag).map { entities ->
             entities.map { it.toInfo() }
@@ -100,6 +104,9 @@ class MeetingRepository(private val db: AppDatabase) {
         audioFilePath = audioFilePath,
         isArchived = isArchived,
         archivedAt = archivedAt,
-        tag = tag
+        tag = tag,
+        asrEngineType = asrEngineType,
+        llmEngineType = llmEngineType,
+        dialectUsed = dialectUsed
     )
 }

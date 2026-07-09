@@ -14,8 +14,14 @@ import com.example.meetingtranscriber.data.model.MeetingInfo
 import com.example.meetingtranscriber.data.model.TranscriptSegment
 import com.example.meetingtranscriber.data.repository.MeetingRepository
 import com.example.meetingtranscriber.data.repository.TranscriptRepository
-import com.example.meetingtranscriber.network.*
+import com.example.meetingtranscriber.network.ConnectionState
 import com.example.meetingtranscriber.security.CryptoManager
+import com.example.meetingtranscriber.MeetingApplication
+import com.example.meetingtranscriber.domain.SummaryUseCase
+import com.example.meetingtranscriber.domain.TranscriptionUseCase
+import com.example.meetingtranscriber.engine.EngineRouter
+import com.example.meetingtranscriber.engine.EngineState
+import com.example.meetingtranscriber.engine.AsrSentence
 import com.example.meetingtranscriber.util.TextFormatter
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -23,37 +29,20 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.File
 
-data class MeetingUiState(
-    val isMeetingActive: Boolean = false,
-    val isPaused: Boolean = false,
-    val isConnected: Boolean = false,
-    val isDemoMode: Boolean = false,
-    val isOfflineMode: Boolean = false,
-    val isSpeaking: Boolean = false,
-    val isUploading: Boolean = false,
-    val elapsedSeconds: Int = 0,
-    val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
-    val interimText: String = "",
-    val speakerLabels: Map<String, String> = emptyMap(),
-    val speakerCount: Int = 0,
-    val errorMessage: String? = null,
-    val selectedLanguage: String = "cn",
-    val selectedProvider: String = "通义听悟",
-    val showOfflineUploadPrompt: Boolean = false
-)
-
 class MeetingViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getInstance(application)
     private val meetingRepository = MeetingRepository(db)
     private val transcriptRepository = TranscriptRepository(db)
 
+    // ── 引擎路由 + UseCase（用于抽象 ASR/LLM 访问，而非直接调用 AsrProvider） ──
+    private val engineRouter: EngineRouter by lazy {
+        (getApplication<MeetingApplication>()).engineRouter
+    }
+    val transcriptionUseCase by lazy { TranscriptionUseCase(engineRouter) }
+    val summaryUseCase by lazy { SummaryUseCase(engineRouter) }
+
     val audioCaptureManager = AudioCaptureManager()
-    private val asrProvider: AsrProvider =
-        createAsrProvider(getApplication()).let { (provider, missing) ->
-            if (missing != null) android.util.Log.w("MeetingViewModel", missing)
-            provider
-        }
     private val vadDetector = VADDetector()
     private val demoSimulator = DemoAsrSimulator()
     private var wavRecorder: WavRecorder? = null
@@ -73,8 +62,11 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     private var recoveryJob: Job? = null
     private val pendingSegmentsForRecovery = mutableListOf<TranscriptSegment>()
 
+    /** 已处理的 ASR 句子数（避免重复 append） */
+    private var processedSentenceCount = 0
+
     init {
-        // --- 真实模式：监听音频 → VAD 过滤 → 发送到云端 ASR / 写入本地 WAV ---
+        // --- 真实模式：监听音频 → VAD 过滤 → TranscriptionUseCase → EngineRouter ---
         viewModelScope.launch {
             audioCaptureManager.audioStream.collect { pcmData ->
                 if (_uiState.value.isMeetingActive && !_uiState.value.isPaused && !_uiState.value.isDemoMode) {
@@ -93,35 +85,65 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                             _uiState.update { it.copy(isSpeaking = isVoice) }
                         }
                         if (isVoice) {
-                            asrProvider.sendAudio(pcmData)
+                            transcriptionUseCase.processAudio(pcmData)
                         }
                     }
                 }
             }
         }
 
-        // 真实 ASR：中间结果（实时出字）
-        asrProvider.onInterimResult = { text ->
-            if (!_uiState.value.isDemoMode) {
-                _uiState.update { it.copy(interimText = text) }
+        // ── TranscriptionUseCase 状态收集（替代 deprecated asrProvider 回调）──
+        viewModelScope.launch {
+            transcriptionUseCase.interimText.collect { text ->
+                if (!_uiState.value.isDemoMode) {
+                    _uiState.update { it.copy(interimText = text) }
+                }
             }
         }
 
-        // 真实 ASR：完整句子
-        asrProvider.onSentenceResult = { result ->
-            if (!_uiState.value.isDemoMode) {
-                appendSegment(result.speakerId, result.text, result.startTimeMs, result.endTimeMs, result.sentenceId)
+        viewModelScope.launch {
+            transcriptionUseCase.sentences.collect { allSentences ->
+                if (_uiState.value.isDemoMode) return@collect
+                // 只处理新句子（增量追加）
+                if (allSentences.size > processedSentenceCount) {
+                    for (i in processedSentenceCount until allSentences.size) {
+                        val s = allSentences[i]
+                        appendSegment(s.speakerId, s.text, s.startTimeMs, s.endTimeMs, s.sentenceId)
+                    }
+                    processedSentenceCount = allSentences.size
+                }
             }
         }
 
-        // 真实 ASR：连接状态
-        asrProvider.onConnectionStateChanged = { state ->
-            _uiState.update { it.copy(connectionState = state, isConnected = state == ConnectionState.CONNECTED) }
+        viewModelScope.launch {
+            transcriptionUseCase.engineStatus.collect { status ->
+                val connState = when (status.state) {
+                    EngineState.RUNNING -> ConnectionState.CONNECTED
+                    EngineState.LOADING -> ConnectionState.CONNECTING
+                    EngineState.ERROR -> ConnectionState.FAILED
+                    EngineState.IDLE -> ConnectionState.DISCONNECTED
+                    else -> ConnectionState.DISCONNECTED
+                }
+                _uiState.update { it.copy(
+                    connectionState = connState,
+                    isConnected = connState == ConnectionState.CONNECTED,
+                    asrEngineStatus = status.state
+                ) }
+            }
         }
 
-        // 真实 ASR：错误处理
-        asrProvider.onError = { error ->
-            _uiState.update { it.copy(errorMessage = error) }
+        viewModelScope.launch {
+            transcriptionUseCase.lastError.collect { error ->
+                if (!_uiState.value.isDemoMode) {
+                    _uiState.update { it.copy(errorMessage = error) }
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            transcriptionUseCase.currentEngine.collect { engineType ->
+                _uiState.update { it.copy(asrEngineName = engineType?.displayName ?: "") }
+            }
         }
 
         // --- 演示模式：模拟转写 ---
@@ -142,7 +164,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 val connected = state == 2
                 _uiState.update { it.copy(isConnected = connected) }
                 if (state == 0) {
-                    // 演示结束，自动触发结束流程
                     onDemoFinished()
                 }
             }
@@ -307,17 +328,16 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
 
-            // 回放 WAV 文件到 ASR（自动检测明文/加密格式）
+            // 回放 WAV 文件到 ASR
             val encKey = CryptoManager.getFileSecretKey()
             WavPlayer.play(file, encKey).collect { pcmData ->
                 if (!_uiState.value.isMeetingActive) return@collect
-                asrProvider.sendAudio(pcmData)
+                transcriptionUseCase.processAudio(pcmData)
             }
 
             // 回放完毕，结束会议
             delay(2000)
-            asrProvider.disconnect()
-            asrProvider.stopTask()
+            transcriptionUseCase.stop()
 
             val updated = meetingRepository.endMeeting(meetingId)
             stopRecoverySaver()
@@ -334,19 +354,23 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** 创建 ASR 连接（签名 → task → connect），失败返回 false */
+    /** 使用 TranscriptionUseCase → EngineRouter 智能路由启动 ASR */
     private suspend fun connectAsr(language: String = "cn"): Boolean {
         val vocab = db.vocabularyDao().getVocabularyForMeeting(currentMeetingId)
-        val success = asrProvider.start(
-            AsrConfig(
+        val result = transcriptionUseCase.start(
+            context = getApplication(),
+            config = com.example.meetingtranscriber.engine.AsrConfig(
                 language = language,
                 vocabularyId = vocab?.vocabularyId
             )
         )
-        if (!success) {
-            _uiState.update { it.copy(errorMessage = "创建转写任务失败，请检查网络。") }
+        if (result.isFailure) {
+            val msg = result.exceptionOrNull()?.message ?: "创建转写任务失败"
+            android.util.Log.e("MeetingViewModel", "ASR 启动失败: $msg")
+            _uiState.update { it.copy(errorMessage = msg) }
             return false
         }
+        processedSentenceCount = 0
         vadDetector.reset()
         return true
     }
@@ -379,8 +403,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 audioCaptureManager.stop()
                 wavRecorder?.stop()
                 wavRecorder = null
-                asrProvider.disconnect()
-                asrProvider.stopTask()
+                transcriptionUseCase.stop()
             }
 
             val wasOffline = _uiState.value.isOfflineMode
@@ -476,14 +499,35 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     private fun generateSummary(meeting: MeetingInfo) {
         viewModelScope.launch {
             try {
+                _uiState.update { it.copy(isGeneratingSummary = true, summaryProgress = 0f) }
+
+                // 收集摘要进度
+                val progressJob = launch {
+                    summaryUseCase.generationProgress.collect { progress ->
+                        _uiState.update { it.copy(summaryProgress = progress) }
+                    }
+                }
+
                 val segments = transcriptRepository.getSegmentsOnce(meeting.id)
                 val fullText = segments.joinToString("\n") {
                     "${it.displaySpeaker} [${it.formattedTime}]: ${it.text}"
                 }
-                val summary = MeetingSummaryGenerator.generate(fullText)
+                // 优先使用 SummaryUseCase（通过引擎路由），回退到 deprecated 规则生成器
+                val summary = summaryUseCase.generate(
+                    getApplication(), fullText, com.example.meetingtranscriber.engine.SummaryStyle.STANDARD
+                ).getOrElse {
+                    // Fallback: 所有云端 LLM 不可用且 Qwen 模型未下载时，
+                    // 回退到内置规则生成器。删除时机：Qwen 模型覆盖 >90% 用户后。
+                    @Suppress("DEPRECATION")
+                    MeetingSummaryGenerator.generate(fullText)
+                }
                 meetingRepository.saveSummary(meeting.id, summary)
+
+                progressJob.cancel()
+                _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 1f) }
             } catch (e: Exception) {
                 android.util.Log.w("MeetingViewModel", "纪要生成失败: ${e.message}")
+                _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 0f) }
             }
         }
     }
@@ -521,13 +565,13 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         super.onCleared()
         if (_uiState.value.isMeetingActive) {
             stopRecoverySaver()
-            try {
-                runBlocking {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
                     withTimeout(2000L) { saveRecoveryState() }
-                }
-            } catch (_: Exception) {}
+                } catch (_: Exception) {}
+            }
             audioCaptureManager.stop()
-            asrProvider.disconnect()
+            viewModelScope.launch { transcriptionUseCase.cancel() }
             demoSimulator.stop()
             wavRecorder?.cancel()
             wavRecorder = null
@@ -559,9 +603,9 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 startTime = meetingStartTime,
                 isOfflineMode = _uiState.value.isOfflineMode,
                 isDemoMode = _uiState.value.isDemoMode,
-                currentTaskId = asrProvider.getCurrentTaskId(),
-                audioBufferFilePath = asrProvider.getOverflowFilePath(),
-                audioBufferFrameCount = asrProvider.getBufferSize(),
+                currentTaskId = "",  // TranscriptionUseCase 已封装引擎细节
+                audioBufferFilePath = null,
+                audioBufferFrameCount = 0,
                 speakerLabelMapJson = Gson().toJson(speakerLabelMap.toMap()),
                 pendingSegmentsJson = Gson().toJson(pendingSegmentsForRecovery.toList())
             )
@@ -616,7 +660,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                         if (overflowFile.exists()) {
                             WavPlayer.play(overflowFile).collect { pcmData ->
                                 if (!_uiState.value.isMeetingActive) return@collect
-                                asrProvider.sendAudio(pcmData)
+                                transcriptionUseCase.processAudio(pcmData)
                             }
                             overflowFile.delete()
                         }

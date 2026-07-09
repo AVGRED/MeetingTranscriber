@@ -9,6 +9,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
+import com.example.meetingtranscriber.PreferencesManager
 import com.example.meetingtranscriber.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -124,7 +125,7 @@ object UpdateChecker {
     }
 
     private fun getUpdateUrl(context: Context): String {
-        return context.getSharedPreferences("meeting_prefs", Context.MODE_PRIVATE)
+        return context.getSharedPreferences(PreferencesManager.PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
             .getString("update_url", DEFAULT_UPDATE_URL) ?: DEFAULT_UPDATE_URL
     }
 

@@ -1,7 +1,7 @@
 package com.example.meetingtranscriber.data.model
 
 /**
- * 会议信息
+ * 会议信息（UI 层使用的数据模型）
  */
 data class MeetingInfo(
     val id: Long = 0,
@@ -16,9 +16,20 @@ data class MeetingInfo(
     val audioFilePath: String? = null,
     val isArchived: Boolean = false,
     val archivedAt: Long? = null,
-    val tag: String? = null
+    val tag: String? = null,
+    // v8: 引擎追踪
+    val asrEngineType: String? = null,
+    val llmEngineType: String? = null,
+    val dialectUsed: String? = null
 ) {
     val isOngoing: Boolean get() = endTime == null
+
+    /** 简短日期字符串（用于列表展示） */
+    val date: String
+        get() {
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            return sdf.format(java.util.Date(startTime))
+        }
 
     val formattedDuration: String
         get() {

@@ -17,6 +17,10 @@ import java.util.concurrent.TimeUnit
  * MVP 阶段使用内置规则生成简单摘要。
  * Phase 2: 优先使用火山方舟 / 豆包生成摘要，未配置时回退到 DashScope 或本地规则。
  */
+@Deprecated(
+    message = "使用 engine.llm.DoubaoEngine / DashScopeEngine / QwenEngine 替代",
+    replaceWith = ReplaceWith("com.example.meetingtranscriber.engine.llm.QwenEngine")
+)
 object MeetingSummaryGenerator {
 
     private const val TAG = "SummaryGenerator"
@@ -169,19 +173,10 @@ object MeetingSummaryGenerator {
         }
     }
 
-    private fun buildSummaryPrompt(transcript: String): String {
-        return """
-你是一位专业的会议纪要助手。请根据以下会议转写内容，生成一份结构化的会议纪要。
-
-要求：
-1. 用一段话概述本次会议的主题和目的。
-2. 列出 3-5 条主要讨论要点，每条用一句话概括。
-3. 如果有明确的决议或待办事项，请单独列出。
-
-会议转写内容：
-$transcript
-        """.trimIndent()
-    }
+    private fun buildSummaryPrompt(transcript: String): String =
+        com.example.meetingtranscriber.engine.llm.PromptBuilder.build(
+            transcript, com.example.meetingtranscriber.engine.SummaryStyle.STANDARD
+        )
 
     private fun buildSimpleSummary(transcript: String): String {
         val lines = transcript.lines().filter { it.isNotBlank() }

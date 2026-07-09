@@ -3,10 +3,12 @@ package com.example.meetingtranscriber
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.os.Build
 import android.util.Log
 import com.example.meetingtranscriber.data.db.AppDatabase
 import com.example.meetingtranscriber.data.db.RecoveryStateEntity
+import com.example.meetingtranscriber.engine.EngineRouter
+import com.example.meetingtranscriber.engine.asr.*
+import com.example.meetingtranscriber.engine.llm.*
 import com.example.meetingtranscriber.network.UpdateChecker
 import com.example.meetingtranscriber.security.CryptoManager
 import com.example.meetingtranscriber.util.StorageMonitor
@@ -22,6 +24,22 @@ class MeetingApplication : Application() {
         lateinit var instance: MeetingApplication
             private set
         var pendingRecoveryState: RecoveryStateEntity? = null
+    }
+
+    /** 引擎路由器（懒加载单例） */
+    val engineRouter: EngineRouter by lazy {
+        val prefs = PreferencesManager(this)
+        val funAsrEngine = FunAsrEngine(this)
+        EngineRouter(
+            prefs = prefs,
+            funAsrEngine = funAsrEngine,
+            funAsrCloudEngine = FunAsrCloudEngine(prefs),
+            tingwuEngine = TingwuEngine(prefs),
+            volcengineEngine = VolcengineEngine(prefs),
+            qwenEngine = QwenEngine(this),
+            doubaoEngine = DoubaoEngine(prefs),
+            dashScopeEngine = DashScopeEngine(prefs)
+        )
     }
 
     override fun onCreate() {

@@ -1,30 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 主题色 -->
+    <!-- M3 Primary (blue #1565C0) -->
     <color name="primary">#1565C0</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#D1E4FF</color>
+    <color name="on_primary_container">#001D36</color>
+
+    <!-- M3 Secondary -->
+    <color name="secondary">#535F70</color>
+    <color name="on_secondary">#FFFFFF</color>
+    <color name="secondary_container">#D7E3F7</color>
+    <color name="on_secondary_container">#101C2B</color>
+
+    <!-- M3 Tertiary -->
+    <color name="tertiary">#6B5778</color>
+    <color name="on_tertiary">#FFFFFF</color>
+    <color name="tertiary_container">#F2DAFF</color>
+    <color name="on_tertiary_container">#251432</color>
+
+    <!-- M3 Error -->
+    <color name="error_red">#BA1A1A</color>
+    <color name="on_error">#FFFFFF</color>
+    <color name="error_container">#FFDAD6</color>
+
+    <!-- M3 Surface / Background -->
+    <color name="background">#FDFCFF</color>
+    <color name="on_background">#1A1C1E</color>
+    <color name="surface">#FDFCFF</color>
+    <color name="on_surface">#1A1C1E</color>
+    <color name="surface_variant">#DFE2EB</color>
+    <color name="on_surface_variant">#43474E</color>
+    <color name="outline">#73777F</color>
+    <color name="outline_variant">#C3C7CF</color>
+
+    <!-- Legacy aliases (for old code compatibility) -->
     <color name="primary_dark">#0D47A1</color>
     <color name="accent">#42A5F5</color>
-    <color name="background">#FAFAFA</color>
-    <color name="surface">#FFFFFF</color>
-    <color name="on_primary">#FFFFFF</color>
-    <color name="on_background">#212121</color>
-    <color name="on_surface">#424242</color>
 
-    <!-- 说话人颜色（5种足够覆盖大多数会议） -->
-    <color name="speaker_1">#1565C0</color>  <!-- 蓝 -->
-    <color name="speaker_2">#E65100</color>  <!-- 橙 -->
-    <color name="speaker_3">#2E7D32</color>  <!-- 绿 -->
-    <color name="speaker_4">#6A1B9A</color>  <!-- 紫 -->
-    <color name="speaker_5">#C62828</color>  <!-- 红 -->
-    <color name="speaker_6">#00695C</color>  <!-- 青 -->
-    <color name="speaker_7">#F9A825</color>  <!-- 金 -->
-    <color name="speaker_8">#4E342E</color>  <!-- 棕 -->
+    <!-- 说话人颜色（8种） -->
+    <color name="speaker_1">#1565C0</color>
+    <color name="speaker_2">#E65100</color>
+    <color name="speaker_3">#2E7D32</color>
+    <color name="speaker_4">#6A1B9A</color>
+    <color name="speaker_5">#C62828</color>
+    <color name="speaker_6">#00695C</color>
+    <color name="speaker_7">#F9A825</color>
+    <color name="speaker_8">#4E342E</color>
 
     <!-- 功能色 -->
     <color name="interim_text">#9E9E9E</color>
     <color name="status_recording">#4CAF50</color>
     <color name="status_connected_silent">#89CFF0</color>
     <color name="status_paused">#FFC107</color>
-    <color name="error_red">#D32F2F</color>
     <color name="divider">#E0E0E0</color>
 </resources>

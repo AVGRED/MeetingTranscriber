@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ASR engine chip IDs (ApiConfigFragment) -->
+    <item name="chip_asr_funasr_cloud" type="id" />
+    <item name="chip_asr_tingwu" type="id" />
+    <item name="chip_asr_volcengine" type="id" />
+    <item name="chip_asr_funasr_local" type="id" />
+
+    <!-- LLM engine chip IDs (ApiConfigFragment) -->
+    <item name="chip_llm_qwen" type="id" />
+    <item name="chip_llm_doubao" type="id" />
+    <item name="chip_llm_dashscope" type="id" />
+</resources>

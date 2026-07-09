@@ -145,12 +145,19 @@ class MeetingFragment : Fragment() {
         }
     }
 
-    private fun startRealMeeting() {
+    /** 公开：从 Home 页面跳转启动实时会议 */
+    fun startRealMeeting() {
         requestPermissionsAndStart(StartMode.REALTIME)
     }
 
-    private fun startOfflineMeeting() {
+    /** 公开：从 Home 页面跳转启动离线录音 */
+    fun startOfflineMeeting() {
         requestPermissionsAndStart(StartMode.OFFLINE)
+    }
+
+    /** 公开：从 Home 页面跳转启动演示模式 */
+    fun startDemo() {
+        viewModel.startDemo(binding.etMeetingTitle.text.toString().trim())
     }
 
     private fun requestPermissionsAndStart(mode: StartMode) {
@@ -255,6 +262,22 @@ class MeetingFragment : Fragment() {
     }
 
     private fun updateUI(state: MeetingUiState) {
+        // 引擎名称标签
+        if (state.asrEngineName.isNotBlank()) {
+            binding.tvEngineLabel.text = "当前引擎：${state.asrEngineName}"
+            binding.tvEngineLabel.visibility = View.VISIBLE
+        } else {
+            binding.tvEngineLabel.visibility = View.GONE
+        }
+
+        // 摘要生成进度
+        if (state.isGeneratingSummary) {
+            binding.progressSummary.visibility = View.VISIBLE
+            binding.progressSummary.progress = (state.summaryProgress * 100).toInt()
+        } else {
+            binding.progressSummary.visibility = View.GONE
+        }
+
         // 连接状态横幅
         when (state.connectionState) {
             ConnectionState.RECONNECTING -> {

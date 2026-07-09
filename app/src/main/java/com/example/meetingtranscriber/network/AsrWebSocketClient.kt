@@ -37,7 +37,7 @@ class AsrWebSocketClient {
 
     private var webSocket: WebSocket? = null
     private var taskId: String? = null
-    private var reconnectAttempts = 0
+    @Volatile private var reconnectAttempts = 0
     private var shouldReconnect = true
     @Volatile private var connectionState = ConnectionState.DISCONNECTED
     private val audioBuffer = ConcurrentLinkedQueue<ByteArray>()
@@ -97,7 +97,18 @@ class AsrWebSocketClient {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "WebSocket 已关闭: $code $reason")
-                updateState(ConnectionState.DISCONNECTED)
+                // 非正常关闭时尝试重连
+                if (code != 1000 && shouldReconnect && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    reconnectAttempts++
+                    updateState(ConnectionState.RECONNECTING)
+                    scope.launch {
+                        delay(RECONNECT_DELAY_MS * reconnectAttempts)
+                        Log.i(TAG, "正在重连... (第${reconnectAttempts}次)")
+                        doConnect(url)
+                    }
+                } else {
+                    updateState(ConnectionState.DISCONNECTED)
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -187,7 +198,7 @@ class AsrWebSocketClient {
 
     fun disconnect() {
         shouldReconnect = false
-        scope.coroutineContext.cancelChildren()
+        scope.coroutineContext[Job]?.cancelChildren()
         try {
             webSocket?.close(1000, "用户结束会议")
         } catch (_: Exception) {}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ 数据提取规则：阻止所有自动备份，保护加密数据库和密钥 -->
+<data-extraction-rules xmlns:tools="http://schemas.android.com/tools">
+    <cloud-backup>
+        <exclude domain="database" />
+        <exclude domain="sharedpref" tools:ignore="InvalidDomain" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" />
+        <exclude domain="sharedpref" tools:ignore="InvalidDomain" />
+    </device-transfer>
+</data-extraction-rules>

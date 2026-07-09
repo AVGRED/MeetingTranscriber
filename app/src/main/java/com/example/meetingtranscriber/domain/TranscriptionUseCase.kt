@@ -1,0 +1,257 @@
+package com.example.meetingtranscriber.domain
+
+import android.content.Context
+import android.util.Log
+import com.example.meetingtranscriber.engine.*
+import com.example.meetingtranscriber.engine.asr.FunAsrCloudEngine
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+
+/**
+ * 转写用例 — 封装完整的「引擎解析 → 启动 → 推音频 → 收句 → 结束」生命周期。
+ *
+ * ViewModel 只需:
+ * ```kotlin
+ * useCase.setOnSentenceListener { sentence -> ... }
+ * useCase.start(context, AsrConfig(language = "cn"))
+ * // 每一帧:
+ * useCase.processAudio(pcmData)
+ * // 结束:
+ * val transcript = useCase.stop()  // → List<AsrSentence>
+ * ```
+ */
+class TranscriptionUseCase(
+    private val engineRouter: EngineRouter
+) {
+    // ═══════════════════════════════════════════════════════════
+    // 公开状态
+    // ═══════════════════════════════════════════════════════════
+
+    /** 当前使用的引擎 */
+    private val _currentEngine = MutableStateFlow<AsrEngineType?>(null)
+    val currentEngine: StateFlow<AsrEngineType?> = _currentEngine
+
+    /** 引擎状态 */
+    private val _engineStatus = MutableStateFlow(EngineStatus(EngineState.IDLE))
+    val engineStatus: StateFlow<EngineStatus> = _engineStatus
+
+    /** 实时中间文本 */
+    private val _interimText = MutableStateFlow("")
+    val interimText: StateFlow<String> = _interimText
+
+    /** 完整句子（实时追加） */
+    private val _sentences = MutableStateFlow<List<AsrSentence>>(emptyList())
+    val sentences: StateFlow<List<AsrSentence>> = _sentences
+
+    /** 完整转写文本（所有句子拼接） */
+    val fullTranscript: StateFlow<String> = _sentences.map { list ->
+        list.joinToString("\n") { it.text }
+    }.stateIn(
+        scope = CoroutineScope(Dispatchers.Main),
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = ""
+    )
+
+    /** 是否正在转写 */
+    private val _isRunning = MutableStateFlow(false)
+    val isRunning: StateFlow<Boolean> = _isRunning
+
+    /** 最后一个错误 */
+    private val _lastError = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val lastError: SharedFlow<String> = _lastError
+
+    // ═══════════════════════════════════════════════════════════
+    // 内部
+    // ═══════════════════════════════════════════════════════════
+
+    private var engine: AsrEngine? = null
+    private var sentenceCollectorJob: Job? = null
+    private var scope: CoroutineScope? = null
+
+    /**
+     * 启动转写。
+     *
+     * @param context Application Context（用于引擎初始化）
+     * @param config ASR 配置（语言、热词等）
+     * @param engineTypeOverride 可选覆盖引擎类型（null = 自动路由）
+     */
+    suspend fun start(
+        context: Context,
+        config: AsrConfig = AsrConfig(language = "cn"),
+        engineTypeOverride: AsrEngineType? = null
+    ): Result<Unit> {
+        // 防止重复启动
+        if (_isRunning.value) {
+            Log.w(TAG, "已有转写在运行，请先 stop()")
+            return Result.failure(IllegalStateException("已有转写在运行"))
+        }
+
+        scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+        try {
+            _engineStatus.value = EngineStatus(EngineState.LOADING, "正在解析引擎...")
+
+            // 1. 解析引擎
+            engine = engineRouter.resolveAsrEngine(context)
+            Log.i(TAG, "已解析引擎: ${engine!!.type.displayName}")
+            _currentEngine.value = engine!!.type
+
+            // 2. 初始化（幂等）
+            val initResult = engine!!.initialize(context)
+            if (initResult.isFailure) {
+                val msg = "引擎初始化失败: ${initResult.exceptionOrNull()?.message}"
+                Log.e(TAG, msg)
+                _engineStatus.value = EngineStatus(EngineState.ERROR, msg)
+                _lastError.emit(msg)
+                return Result.failure(initResult.exceptionOrNull()!!)
+            }
+
+            // 3. 启动
+            val startResult = engine!!.start(config)
+            if (startResult.isFailure) {
+                val msg = "引擎启动失败: ${startResult.exceptionOrNull()?.message}"
+                Log.e(TAG, msg)
+                _engineStatus.value = EngineStatus(EngineState.ERROR, msg)
+                _lastError.emit(msg)
+                return Result.failure(startResult.exceptionOrNull()!!)
+            }
+
+            // 4. 开始收集句子 + interim
+            _sentences.value = emptyList()
+            _interimText.value = ""
+            _isRunning.value = true
+
+            // 监听引擎状态
+            sentenceCollectorJob = scope!!.launch {
+                launch {
+                    engine!!.interimText.collect { text ->
+                        _interimText.value = text
+                    }
+                }
+                launch {
+                    engine!!.sentenceResults.collect { sentence ->
+                        val updated = _sentences.value + sentence
+                        _sentences.value = updated
+                        Log.d(TAG, "累计 ${updated.size} 句")
+                    }
+                }
+                launch {
+                    engine!!.engineStatus.collect { status ->
+                        _engineStatus.value = status
+                    }
+                }
+            }
+
+            Log.i(TAG, "转写已启动, engine=${engine!!.type.displayName}")
+            return Result.success(Unit)
+        } catch (e: NoEngineException) {
+            val msg = "无可用的 ASR 引擎: ${e.message}"
+            Log.e(TAG, msg)
+            _engineStatus.value = EngineStatus(EngineState.ERROR, msg)
+            _lastError.emit(msg)
+            engine = null
+            return Result.failure(e)
+        } catch (e: Exception) {
+            Log.e(TAG, "启动转写异常", e)
+            _engineStatus.value = EngineStatus(EngineState.ERROR, "异常: ${e.message}")
+            _lastError.emit("异常: ${e.message}")
+            engine = null
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * 喂入一帧 PCM 音频。
+     */
+    fun processAudio(pcmData: ByteArray) {
+        if (!_isRunning.value) return
+        engine?.processAudio(pcmData)
+    }
+
+    /**
+     * 结束转写，返回所有句子。
+     *
+     * @return 完整句子列表（可能为空）
+     */
+    suspend fun stop(): List<AsrSentence> = withContext(Dispatchers.IO) {
+        _isRunning.value = false
+
+        try {
+            engine?.finalize()
+        } catch (e: Exception) {
+            Log.e(TAG, "finalize 异常", e)
+        }
+
+        // 等待最后的结果 flush
+        delay(300)
+
+        sentenceCollectorJob?.cancel()
+        sentenceCollectorJob = null
+
+        val result = _sentences.value.toList()
+        Log.i(TAG, "转写结束，共 ${result.size} 句")
+
+        // 释放引擎
+        try {
+            engine?.dispose()
+        } catch (e: Exception) {
+            Log.e(TAG, "dispose 异常", e)
+        }
+
+        engine = null
+        _engineStatus.value = EngineStatus(EngineState.IDLE)
+        _interimText.value = ""
+        _currentEngine.value = null
+        scope?.cancel()
+        scope = null
+
+        result
+    }
+
+    /**
+     * 取消转写（不保留结果）。
+     */
+    suspend fun cancel() {
+        _isRunning.value = false
+        sentenceCollectorJob?.cancel()
+        sentenceCollectorJob = null
+
+        try {
+            engine?.dispose()
+        } catch (_: Exception) {}
+
+        engine = null
+        _sentences.value = emptyList()
+        _interimText.value = ""
+        _engineStatus.value = EngineStatus(EngineState.IDLE)
+        _currentEngine.value = null
+        scope?.cancel()
+        scope = null
+        Log.i(TAG, "转写已取消")
+    }
+
+    /**
+     * 动态切换方言（如果当前引擎支持）。
+     * 部分云端引擎不支持运行时切换语言 — 调用方需处理 Result.failure。
+     */
+    suspend fun switchLanguage(languageCode: String): Result<Unit> {
+        val current = engine ?: return Result.failure(IllegalStateException("没有活跃的引擎"))
+        try {
+            // 重启流
+            current.finalize()
+            val config = AsrConfig(language = languageCode)
+            val result = current.start(config)
+            if (result.isSuccess) {
+                Log.i(TAG, "已切换语言: $languageCode")
+            }
+            return result
+        } catch (e: Exception) {
+            Log.e(TAG, "切换语言失败", e)
+            return Result.failure(e)
+        }
+    }
+
+    companion object {
+        private const val TAG = "TranscriptionUseCase"
+    }
+}

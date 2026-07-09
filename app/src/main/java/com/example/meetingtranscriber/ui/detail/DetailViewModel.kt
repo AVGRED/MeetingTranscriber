@@ -3,11 +3,15 @@ package com.example.meetingtranscriber.ui.detail
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.meetingtranscriber.MeetingApplication
 import com.example.meetingtranscriber.data.db.AppDatabase
 import com.example.meetingtranscriber.data.model.MeetingInfo
 import com.example.meetingtranscriber.data.model.TranscriptSegment
 import com.example.meetingtranscriber.data.repository.MeetingRepository
 import com.example.meetingtranscriber.data.repository.TranscriptRepository
+import com.example.meetingtranscriber.domain.SummaryUseCase
+import com.example.meetingtranscriber.engine.EngineRouter
+import com.example.meetingtranscriber.engine.SummaryStyle
 import com.example.meetingtranscriber.ui.meeting.MeetingSummaryGenerator
 import com.example.meetingtranscriber.util.TextFormatter
 import kotlinx.coroutines.flow.*
@@ -19,6 +23,11 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
     private val db = AppDatabase.getInstance(application)
     private val meetingRepository = MeetingRepository(db)
     private val transcriptRepository = TranscriptRepository(db)
+
+    private val engineRouter: EngineRouter by lazy {
+        (getApplication<MeetingApplication>()).engineRouter
+    }
+    private val summaryUseCase by lazy { SummaryUseCase(engineRouter) }
 
     private val meetingId = MutableStateFlow(0L)
     private val _originalSummary = MutableStateFlow<String?>(null)
@@ -131,7 +140,14 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
             val fullText = allSegments.joinToString("\n") {
                 "${it.displaySpeaker} [${it.formattedTime}]: ${it.text}"
             }
-            val summary = MeetingSummaryGenerator.generate(fullText)
+            // 优先使用 SummaryUseCase（通过引擎路由）
+            // Fallback: 所有云端 LLM 不可用且 Qwen 模型未下载时，回退到内置规则生成器
+            val summary = summaryUseCase.generate(
+                getApplication(), fullText, SummaryStyle.STANDARD
+            ).getOrElse {
+                @Suppress("DEPRECATION")
+                MeetingSummaryGenerator.generate(fullText)
+            }
             meetingRepository.saveSummary(m.id, summary)
             _originalSummary.value = summary
             _isSummaryEdited.value = false
