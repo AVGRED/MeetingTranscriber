@@ -14,8 +14,7 @@ import com.example.meetingtranscriber.databinding.ItemMeetingHistoryBinding
 class HistoryAdapter(
     private val onItemClick: (MeetingInfo) -> Unit,
     private val onDeleteClick: (MeetingInfo) -> Unit,
-    private val onRestoreClick: ((MeetingInfo) -> Unit)? = null,
-    private val onUploadClick: ((MeetingInfo) -> Unit)? = null
+    private val onRestoreClick: ((MeetingInfo) -> Unit)? = null
 ) : ListAdapter<MeetingInfo, HistoryAdapter.ViewHolder>(DiffCallback) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -62,19 +61,12 @@ class HistoryAdapter(
                 binding.btnDelete.setOnClickListener { onDeleteClick(meeting) }
                 binding.btnRestore.visibility = View.VISIBLE
                 binding.btnRestore.setOnClickListener { onRestoreClick?.invoke(meeting) }
-                binding.btnUpload.visibility = View.GONE
             } else {
                 binding.btnDelete.contentDescription = "删除"
                 binding.btnDelete.setOnClickListener { onDeleteClick(meeting) }
                 binding.btnRestore.visibility = View.GONE
-
-                if (meeting.isOffline && meeting.endTime != null) {
-                    binding.btnUpload.visibility = View.VISIBLE
-                    binding.btnUpload.setOnClickListener { onUploadClick?.invoke(meeting) }
-                } else {
-                    binding.btnUpload.visibility = View.GONE
-                }
             }
+            binding.btnUpload.visibility = View.GONE
         }
     }
 

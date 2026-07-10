@@ -62,8 +62,11 @@ class EngineRouter(
      * 解析当前可用的最佳 ASR 引擎。
      * 确保返回的引擎已经 initialize() 过。
      */
-    suspend fun resolveAsrEngine(context: Context): AsrEngine {
-        val preferred = prefs.preferredAsrEngine
+    suspend fun resolveAsrEngine(
+        context: Context,
+        overrideType: AsrEngineType? = null
+    ): AsrEngine {
+        val preferred = overrideType ?: prefs.preferredAsrEngine
         val hasNetwork = NetworkMonitor.isNetworkAvailable
 
         logRoute("ASR", preferred.displayName, hasNetwork)
@@ -75,9 +78,11 @@ class EngineRouter(
                 funAsrEngine
             }
 
-            // ── 无网络 → 提示错误 ──
+            // ── 无网络 → 自动降级本地引擎 ──
             !hasNetwork -> {
-                throw NoEngineException("网络不可用，无法连接云端 ASR 引擎。请连接网络后重试。")
+                Log.i(TAG, "🌐 无网络，自动降级到本地 FunASR")
+                ensureInitializedOrThrow(context, funAsrEngine)
+                funAsrEngine
             }
 
             // ── FunASR 云端（默认） ──

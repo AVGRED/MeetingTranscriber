@@ -66,15 +66,6 @@ class HistoryFragment : Fragment() {
             onRestoreClick = { meeting ->
                 viewModel.restoreMeeting(meeting.id)
                 Toast.makeText(requireContext(), "已恢复", Toast.LENGTH_SHORT).show()
-            },
-            onUploadClick = { meeting ->
-                val meetingFrag = requireActivity()
-                    .supportFragmentManager
-                    .findFragmentByTag("meeting") as? MeetingFragment
-                meetingFrag?.startUpload(meeting.id)
-                requireActivity().findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(
-                    R.id.bottom_navigation
-                )?.selectedItemId = R.id.nav_meeting
             }
         )
 

@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.meetingtranscriber.audio.AudioCaptureManager
-import com.example.meetingtranscriber.audio.DemoAsrSimulator
 import com.example.meetingtranscriber.audio.VADDetector
 import com.example.meetingtranscriber.audio.WavPlayer
 import com.example.meetingtranscriber.audio.WavRecorder
@@ -44,7 +43,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
     val audioCaptureManager = AudioCaptureManager()
     private val vadDetector = VADDetector()
-    private val demoSimulator = DemoAsrSimulator()
     private var wavRecorder: WavRecorder? = null
 
     private val _uiState = MutableStateFlow(MeetingUiState())
@@ -69,24 +67,15 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         // --- 真实模式：监听音频 → VAD 过滤 → TranscriptionUseCase → EngineRouter ---
         viewModelScope.launch {
             audioCaptureManager.audioStream.collect { pcmData ->
-                if (_uiState.value.isMeetingActive && !_uiState.value.isPaused && !_uiState.value.isDemoMode) {
-                    if (_uiState.value.isOfflineMode) {
-                        wavRecorder?.write(pcmData)
-                        if (!_uiState.value.isSpeaking) {
-                            _uiState.update { it.copy(isSpeaking = true) }
-                        }
-                    } else {
-                        // 实时模式：同时保存到本地 WAV
-                        if (!_uiState.value.isUploading) {
-                            wavRecorder?.write(pcmData)
-                        }
-                        val isVoice = vadDetector.isVoice(pcmData)
-                        if (_uiState.value.isSpeaking != isVoice) {
-                            _uiState.update { it.copy(isSpeaking = isVoice) }
-                        }
-                        if (isVoice) {
-                            transcriptionUseCase.processAudio(pcmData)
-                        }
+                if (_uiState.value.isMeetingActive && !_uiState.value.isPaused) {
+                    // 保存到本地 WAV + VAD + ASR 转写
+                    wavRecorder?.write(pcmData)
+                    val isVoice = vadDetector.isVoice(pcmData)
+                    if (_uiState.value.isSpeaking != isVoice) {
+                        _uiState.update { it.copy(isSpeaking = isVoice) }
+                    }
+                    if (isVoice) {
+                        transcriptionUseCase.processAudio(pcmData)
                     }
                 }
             }
@@ -95,15 +84,12 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         // ── TranscriptionUseCase 状态收集（替代 deprecated asrProvider 回调）──
         viewModelScope.launch {
             transcriptionUseCase.interimText.collect { text ->
-                if (!_uiState.value.isDemoMode) {
-                    _uiState.update { it.copy(interimText = text) }
-                }
+                _uiState.update { it.copy(interimText = text) }
             }
         }
 
         viewModelScope.launch {
             transcriptionUseCase.sentences.collect { allSentences ->
-                if (_uiState.value.isDemoMode) return@collect
                 // 只处理新句子（增量追加）
                 if (allSentences.size > processedSentenceCount) {
                     for (i in processedSentenceCount until allSentences.size) {
@@ -134,9 +120,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             transcriptionUseCase.lastError.collect { error ->
-                if (!_uiState.value.isDemoMode) {
-                    _uiState.update { it.copy(errorMessage = error) }
-                }
+                _uiState.update { it.copy(errorMessage = error) }
             }
         }
 
@@ -146,63 +130,15 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
-        // --- 演示模式：模拟转写 ---
-        demoSimulator.onInterimResult = { text ->
-            if (_uiState.value.isDemoMode) {
-                _uiState.update { it.copy(interimText = text) }
-            }
-        }
-
-        demoSimulator.onSentenceResult = { sentenceId, text, speakerId, startMs, endMs ->
-            if (_uiState.value.isDemoMode) {
-                appendSegment(speakerId, text, startMs, endMs, sentenceId)
-            }
-        }
-
-        demoSimulator.onConnectionStateChanged = { state ->
-            if (_uiState.value.isDemoMode) {
-                val connected = state == 2
-                _uiState.update { it.copy(isConnected = connected) }
-                if (state == 0) {
-                    onDemoFinished()
-                }
-            }
-        }
     }
 
-    /** 演示模式 — 不需要权限、不需要 API Key */
-    fun startDemo(title: String = "演示会议") {
-        viewModelScope.launch {
-            val finalTitle = title.ifBlank { "演示会议" }
-            currentMeetingTitle = finalTitle
-            currentMeetingId = meetingRepository.createMeeting(finalTitle)
-            meetingStartTime = System.currentTimeMillis()
-
-            _uiState.update { it.copy(
-                isMeetingActive = true,
-                isPaused = false,
-                isDemoMode = true,
-                isConnected = true,
-                isSpeaking = false,
-                errorMessage = null,
-                speakerLabels = emptyMap(),
-                speakerCount = 0,
-                elapsedSeconds = 0,
-                interimText = ""
-            ) }
-            _segments.value = emptyList()
-            speakerLabelMap.clear()
-            pendingSegmentsForRecovery.clear()
-            vadDetector.reset()
-
-            startTimer()
-            startRecoverySaver()
-            demoSimulator.start()
-        }
-    }
-
-    /** 真实模式 — 需要录音权限 + API Key */
-    fun startMeeting(title: String = "会议_${System.currentTimeMillis()}", language: String = "cn", tag: String? = null) {
+    /** 在线/离线会议 — 引擎自动路由 */
+    fun startMeeting(
+        title: String = "会议_${System.currentTimeMillis()}",
+        language: String = "cn",
+        tag: String? = null,
+        engineTypeOverride: com.example.meetingtranscriber.engine.AsrEngineType? = null
+    ) {
         viewModelScope.launch {
             if (!audioCaptureManager.hasPermission()) {
                 _uiState.update { it.copy(errorMessage = "缺少录音权限") }
@@ -234,135 +170,33 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
 
-            if (!connectAsr(language)) return@launch
+            if (!connectAsr(language, engineTypeOverride)) return@launch
 
             _uiState.update { it.copy(
                 isMeetingActive = true,
                 isPaused = false,
-                isDemoMode = false,
                 isSpeaking = false,
                 errorMessage = null,
                 selectedLanguage = language
             ) }
             startTimer()
             startRecoverySaver()
-        }
-    }
-
-    /** 离线录音 — 无需网络，音频保存为本地 WAV */
-    fun startOfflineMeeting(title: String, language: String = "cn", tag: String? = null) {
-        viewModelScope.launch {
-            if (!audioCaptureManager.hasPermission()) {
-                _uiState.update { it.copy(errorMessage = "缺少录音权限") }
-                return@launch
-            }
-
-            currentMeetingTitle = title.ifBlank { "离线会议" }
-            currentMeetingId = meetingRepository.createOfflineMeeting(
-                title = title.ifBlank { "离线会议" },
-                startTime = System.currentTimeMillis(),
-                tag = tag
-            )
-
-            val file = File(
-                getApplication<com.example.meetingtranscriber.MeetingApplication>().getExternalFilesDir(null),
-                "offline_${currentMeetingId}.wav"
-            )
-            val encKey = CryptoManager.getFileSecretKey()
-            wavRecorder = WavRecorder(file, encKey).also {
-                if (!it.start()) {
-                    _uiState.update { state -> state.copy(errorMessage = "创建录音文件失败") }
-                    return@launch
-                }
-            }
-            meetingRepository.updateAudioFilePath(currentMeetingId, file.absolutePath)
-
-            val started = audioCaptureManager.start()
-            if (!started) {
-                wavRecorder?.cancel()
-                wavRecorder = null
-                _uiState.update { it.copy(errorMessage = "启动音频采集失败") }
-                return@launch
-            }
-
-            meetingStartTime = System.currentTimeMillis()
-            _uiState.update { it.copy(
-                isMeetingActive = true,
-                isPaused = false,
-                isOfflineMode = true,
-                isDemoMode = false,
-                isSpeaking = false,
-                errorMessage = null,
-                selectedLanguage = language
-            ) }
-            startTimer()
-            startRecoverySaver()
-        }
-    }
-
-    /** 上传离线录音到云端转写 */
-    fun uploadOfflineMeeting(meetingId: Long) {
-        viewModelScope.launch {
-            val meeting = meetingRepository.getMeeting(meetingId) ?: return@launch
-            val path = meeting.audioFilePath ?: return@launch
-            val file = File(path)
-            if (!file.exists()) {
-                _uiState.update { it.copy(errorMessage = "录音文件不存在") }
-                return@launch
-            }
-
-            currentMeetingId = meetingId
-            if (!connectAsr(_uiState.value.selectedLanguage)) return@launch
-
-            _uiState.update { it.copy(isUploading = true, isMeetingActive = true, isOfflineMode = false, errorMessage = null) }
-            meetingStartTime = System.currentTimeMillis()
-            startTimer()
-
-            // 等待 WebSocket 连接成功
-            val connected = withTimeoutOrNull(10000L) {
-                uiState.first { it.connectionState == ConnectionState.CONNECTED }
-            }
-
-            if (connected == null) {
-                _uiState.update { it.copy(errorMessage = "上传失败：无法连接转写服务", isUploading = false) }
-                return@launch
-            }
-
-            // 回放 WAV 文件到 ASR
-            val encKey = CryptoManager.getFileSecretKey()
-            WavPlayer.play(file, encKey).collect { pcmData ->
-                if (!_uiState.value.isMeetingActive) return@collect
-                transcriptionUseCase.processAudio(pcmData)
-            }
-
-            // 回放完毕，结束会议
-            delay(2000)
-            transcriptionUseCase.stop()
-
-            val updated = meetingRepository.endMeeting(meetingId)
-            stopRecoverySaver()
-            recoveryStateDao.delete(meetingId)
-            _uiState.update { it.copy(
-                isMeetingActive = false,
-                isOfflineMode = false,
-                isUploading = false,
-                interimText = ""
-            ) }
-            stopTimer()
-
-            if (updated != null) generateSummary(updated)
         }
     }
 
     /** 使用 TranscriptionUseCase → EngineRouter 智能路由启动 ASR */
-    private suspend fun connectAsr(language: String = "cn"): Boolean {
+    private suspend fun connectAsr(
+        language: String = "cn",
+        engineTypeOverride: com.example.meetingtranscriber.engine.AsrEngineType? = null
+    ): Boolean {
         val vocab = db.vocabularyDao().getVocabularyForMeeting(currentMeetingId)
         val result = transcriptionUseCase.start(
             context = getApplication(),
             config = com.example.meetingtranscriber.engine.AsrConfig(
                 language = language,
                 vocabularyId = vocab?.vocabularyId
-            )
+            ),
+            engineTypeOverride = engineTypeOverride
         )
         if (result.isFailure) {
             val msg = result.exceptionOrNull()?.message ?: "创建转写任务失败"
@@ -391,22 +225,12 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     fun endMeeting() {
         viewModelScope.launch {
             stopRecoverySaver()
-            val isDemo = _uiState.value.isDemoMode
 
-            if (isDemo) {
-                demoSimulator.stop()
-            } else if (_uiState.value.isOfflineMode) {
-                audioCaptureManager.stop()
-                wavRecorder?.stop()
-                wavRecorder = null
-            } else {
-                audioCaptureManager.stop()
-                wavRecorder?.stop()
-                wavRecorder = null
-                transcriptionUseCase.stop()
-            }
+            audioCaptureManager.stop()
+            wavRecorder?.stop()
+            wavRecorder = null
+            transcriptionUseCase.stop()
 
-            val wasOffline = _uiState.value.isOfflineMode
             val meeting = meetingRepository.endMeeting(currentMeetingId)
             recoveryStateDao.delete(currentMeetingId)
 
@@ -414,34 +238,10 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 isMeetingActive = false,
                 isPaused = false,
                 interimText = "",
-                isConnected = false,
-                isDemoMode = false,
-                isOfflineMode = false,
-                showOfflineUploadPrompt = wasOffline
+                isConnected = false
             ) }
             stopTimer()
 
-            if (meeting != null && !meeting.isOffline) {
-                generateSummary(meeting)
-                segmentTopics(meeting)
-            }
-        }
-    }
-
-    /** 演示模式播放完毕后自动触发 */
-    private fun onDemoFinished() {
-        viewModelScope.launch {
-            stopRecoverySaver()
-            val meeting = meetingRepository.endMeeting(currentMeetingId)
-            recoveryStateDao.delete(currentMeetingId)
-            _uiState.update { it.copy(
-                isMeetingActive = false,
-                isPaused = false,
-                interimText = "",
-                isConnected = false,
-                isDemoMode = false
-            ) }
-            stopTimer()
             if (meeting != null) {
                 generateSummary(meeting)
                 segmentTopics(meeting)
@@ -460,10 +260,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 _segments.value = list
             }
         }
-    }
-
-    fun dismissUploadPrompt() {
-        _uiState.update { it.copy(showOfflineUploadPrompt = false) }
     }
 
     fun clearError() {
@@ -572,7 +368,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             }
             audioCaptureManager.stop()
             viewModelScope.launch { transcriptionUseCase.cancel() }
-            demoSimulator.stop()
             wavRecorder?.cancel()
             wavRecorder = null
         }
@@ -601,8 +396,8 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 meetingId = currentMeetingId,
                 title = currentMeetingTitle,
                 startTime = meetingStartTime,
-                isOfflineMode = _uiState.value.isOfflineMode,
-                isDemoMode = _uiState.value.isDemoMode,
+                isOfflineMode = false,
+                isDemoMode = false,
                 currentTaskId = "",  // TranscriptionUseCase 已封装引擎细节
                 audioBufferFilePath = null,
                 audioBufferFrameCount = 0,
@@ -633,38 +428,32 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             _uiState.update { it.copy(
                 isMeetingActive = true,
                 isPaused = false,
-                isDemoMode = state.isDemoMode,
-                isOfflineMode = state.isOfflineMode,
                 speakerLabels = speakerLabelMap.toMap(),
                 speakerCount = speakerLabelMap.size
             ) }
 
             pendingSegments.forEach { transcriptRepository.saveSegment(it) }
 
-            if (!state.isDemoMode) {
-                if (!state.isOfflineMode) {
-                    // 重新连接 ASR
-                    if (!audioCaptureManager.hasPermission()) {
-                        _uiState.update { it.copy(errorMessage = "恢复失败：缺少录音权限") }
-                        return@launch
+            // 重新连接 ASR
+            if (!audioCaptureManager.hasPermission()) {
+                _uiState.update { it.copy(errorMessage = "恢复失败：缺少录音权限") }
+                return@launch
+            }
+            val started = audioCaptureManager.start()
+            if (!started) {
+                _uiState.update { it.copy(errorMessage = "恢复音频采集失败") }
+                return@launch
+            }
+            connectAsr(_uiState.value.selectedLanguage)
+            // 回放溢出音频
+            state.audioBufferFilePath?.let { path ->
+                val overflowFile = File(path)
+                if (overflowFile.exists()) {
+                    WavPlayer.play(overflowFile).collect { pcmData ->
+                        if (!_uiState.value.isMeetingActive) return@collect
+                        transcriptionUseCase.processAudio(pcmData)
                     }
-                    val started = audioCaptureManager.start()
-                    if (!started) {
-                        _uiState.update { it.copy(errorMessage = "恢复音频采集失败") }
-                        return@launch
-                    }
-                    connectAsr(_uiState.value.selectedLanguage)
-                    // 回放溢出音频
-                    state.audioBufferFilePath?.let { path ->
-                        val overflowFile = File(path)
-                        if (overflowFile.exists()) {
-                            WavPlayer.play(overflowFile).collect { pcmData ->
-                                if (!_uiState.value.isMeetingActive) return@collect
-                                transcriptionUseCase.processAudio(pcmData)
-                            }
-                            overflowFile.delete()
-                        }
-                    }
+                    overflowFile.delete()
                 }
             }
 

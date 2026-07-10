@@ -72,9 +72,8 @@ class MainActivity : AppCompatActivity() {
         binding.root.post {
             val frag = supportFragmentManager.findFragmentByTag("meeting") as? MeetingFragment
             when (mode) {
-                "realtime" -> frag?.startRealMeeting()
+                "realtime" -> frag?.startOnlineMeeting()
                 "offline" -> frag?.startOfflineMeeting()
-                "demo" -> frag?.startDemo()
             }
         }
     }

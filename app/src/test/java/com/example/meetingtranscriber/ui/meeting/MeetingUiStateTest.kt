@@ -1,5 +1,6 @@
 package com.example.meetingtranscriber.ui.meeting
 
+import com.example.meetingtranscriber.engine.EngineState
 import com.example.meetingtranscriber.network.ConnectionState
 import org.junit.Assert.*
 import org.junit.Test
@@ -13,9 +14,7 @@ class MeetingUiStateTest {
         assertFalse(state.isPaused)
         assertFalse(state.isConnected)
         assertFalse(state.isDemoMode)
-        assertFalse(state.isOfflineMode)
         assertFalse(state.isSpeaking)
-        assertFalse(state.isUploading)
         assertEquals(0, state.elapsedSeconds)
         assertEquals(ConnectionState.DISCONNECTED, state.connectionState)
         assertEquals("", state.interimText)
@@ -23,7 +22,10 @@ class MeetingUiStateTest {
         assertEquals(0, state.speakerCount)
         assertNull(state.errorMessage)
         assertEquals("cn", state.selectedLanguage)
-        assertFalse(state.showOfflineUploadPrompt)
+        assertEquals("", state.asrEngineName)
+        assertEquals(EngineState.IDLE, state.asrEngineStatus)
+        assertFalse(state.isGeneratingSummary)
+        assertEquals(0f, state.summaryProgress)
     }
 
     @Test
@@ -33,41 +35,39 @@ class MeetingUiStateTest {
             isPaused = false,
             isConnected = true,
             isDemoMode = false,
-            isOfflineMode = false,
             errorMessage = null,
             selectedLanguage = "yue"
         )
         assertTrue(state.isMeetingActive)
         assertTrue(state.isConnected)
         assertEquals("yue", state.selectedLanguage)
-        assertFalse(state.isOfflineMode)
         assertNull(state.errorMessage)
     }
 
     @Test
-    fun `start demo mode transitions`() {
+    fun `start online meeting with engine info`() {
         val state = MeetingUiState().copy(
             isMeetingActive = true,
-            isDemoMode = true,
             isConnected = true,
-            errorMessage = null,
-            elapsedSeconds = 0
+            asrEngineName = "FunASR 云端",
+            asrEngineStatus = EngineState.RUNNING
         )
-        assertTrue(state.isDemoMode)
         assertTrue(state.isMeetingActive)
+        assertEquals("FunASR 云端", state.asrEngineName)
+        assertEquals(EngineState.RUNNING, state.asrEngineStatus)
     }
 
     @Test
-    fun `start offline mode transitions`() {
+    fun `start offline meeting uses local engine`() {
         val state = MeetingUiState().copy(
             isMeetingActive = true,
-            isOfflineMode = true,
-            isDemoMode = false,
-            isSpeaking = false,
-            errorMessage = null
+            isConnected = false,
+            asrEngineName = "FunASR 离线",
+            asrEngineStatus = EngineState.RUNNING
         )
-        assertTrue(state.isOfflineMode)
-        assertFalse(state.isConnected) // offline = no cloud connection
+        assertTrue(state.isMeetingActive)
+        assertFalse(state.isConnected) // 离线 = 无云端连接
+        assertEquals("FunASR 离线", state.asrEngineName)
     }
 
     @Test
@@ -87,6 +87,7 @@ class MeetingUiStateTest {
             isConnected = true,
             isDemoMode = true,
             interimText = "some text",
+            asrEngineName = "FunASR 云端",
             errorMessage = null
         )
         val ended = active.copy(
@@ -95,31 +96,13 @@ class MeetingUiStateTest {
             interimText = "",
             isConnected = false,
             isDemoMode = false,
-            isOfflineMode = false
+            asrEngineName = ""
         )
         assertFalse(ended.isMeetingActive)
         assertEquals("", ended.interimText)
         assertFalse(ended.isConnected)
         assertFalse(ended.isDemoMode)
-    }
-
-    @Test
-    fun `end offline meeting sets upload prompt`() {
-        val ended = MeetingUiState(
-            isMeetingActive = false,
-            isOfflineMode = false,
-            showOfflineUploadPrompt = true
-        )
-        assertTrue(ended.showOfflineUploadPrompt)
-        assertFalse(ended.isMeetingActive)
-        assertFalse(ended.isOfflineMode)
-    }
-
-    @Test
-    fun `dismiss upload prompt clears flag`() {
-        val withPrompt = MeetingUiState(showOfflineUploadPrompt = true)
-        val dismissed = withPrompt.copy(showOfflineUploadPrompt = false)
-        assertFalse(dismissed.showOfflineUploadPrompt)
+        assertEquals("", ended.asrEngineName)
     }
 
     @Test
@@ -148,16 +131,20 @@ class MeetingUiStateTest {
     }
 
     @Test
-    fun `uploading state is independent of offline mode`() {
-        val uploading = MeetingUiState(
-            isUploading = true,
-            isMeetingActive = true,
-            isOfflineMode = false,
-            errorMessage = null
+    fun `summary generation state`() {
+        val generating = MeetingUiState(
+            isGeneratingSummary = true,
+            summaryProgress = 0.5f
         )
-        assertTrue(uploading.isUploading)
-        assertTrue(uploading.isMeetingActive)
-        assertFalse(uploading.isOfflineMode)
+        assertTrue(generating.isGeneratingSummary)
+        assertEquals(0.5f, generating.summaryProgress)
+
+        val done = generating.copy(
+            isGeneratingSummary = false,
+            summaryProgress = 1f
+        )
+        assertFalse(done.isGeneratingSummary)
+        assertEquals(1f, done.summaryProgress)
     }
 
     @Test
@@ -186,5 +173,25 @@ class MeetingUiStateTest {
         val withInterim = MeetingUiState(interimText = "partial sentence...")
         val afterSentence = withInterim.copy(interimText = "")
         assertEquals("", afterSentence.interimText)
+    }
+
+    @Test
+    fun `engine status error propagated to ui state`() {
+        val error = MeetingUiState(
+            asrEngineStatus = EngineState.ERROR,
+            errorMessage = "模型加载失败"
+        )
+        assertEquals(EngineState.ERROR, error.asrEngineStatus)
+        assertEquals("模型加载失败", error.errorMessage)
+    }
+
+    @Test
+    fun `engine loading state`() {
+        val loading = MeetingUiState(
+            asrEngineStatus = EngineState.LOADING,
+            asrEngineName = "FunASR 离线"
+        )
+        assertEquals(EngineState.LOADING, loading.asrEngineStatus)
+        assertEquals("FunASR 离线", loading.asrEngineName)
     }
 }

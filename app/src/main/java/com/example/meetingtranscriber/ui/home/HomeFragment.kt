@@ -49,9 +49,6 @@ class HomeFragment : Fragment() {
         binding.btnOffline.setOnClickListener {
             (requireActivity() as MainActivity).navigateToMeeting("offline")
         }
-        binding.btnDemo.setOnClickListener {
-            (requireActivity() as MainActivity).navigateToMeeting("demo")
-        }
         binding.btnViewAll.setOnClickListener {
             (requireActivity() as MainActivity).navigateToTab(R.id.nav_history)
         }

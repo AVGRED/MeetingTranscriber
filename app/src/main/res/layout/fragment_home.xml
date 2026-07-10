@@ -185,17 +185,9 @@
                         android:layout_height="48dp"
                         android:layout_marginEnd="8dp"
                         android:layout_weight="1"
-                        android:text="离线录音"
+                        android:text="离线会议"
                         app:cornerRadius="24dp" />
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_demo"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="48dp"
-                        android:layout_weight="1"
-                        android:text="演示"
-                        app:cornerRadius="24dp" />
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

@@ -1,7 +1,6 @@
 package com.example.meetingtranscriber.ui.meeting
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -28,32 +27,25 @@ import kotlinx.coroutines.launch
 
 class MeetingFragment : Fragment() {
 
-    private enum class StartMode {
-        REALTIME,
-        OFFLINE
-    }
+    private enum class StartMode { ONLINE, OFFLINE }
 
     private var _binding: FragmentMeetingBinding? = null
     private val binding get() = _binding!!
 
     private val viewModel: MeetingViewModel by viewModels()
     private lateinit var adapter: TranscriptAdapter
-    private var pendingStartMode: StartMode = StartMode.REALTIME
+    private var pendingStartMode: StartMode = StartMode.ONLINE
 
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            startMeetingWithService(pendingStartMode)
-        } else {
-            Toast.makeText(requireContext(), "录音权限是必需的", Toast.LENGTH_LONG).show()
-        }
+        if (granted) startMeetingWithService(pendingStartMode)
+        else Toast.makeText(requireContext(), "录音权限是必需的", Toast.LENGTH_LONG).show()
     }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { _ ->
-        // 无论通知权限是否被授予，都继续启动前台 Service
+    ) {
         checkAudioPermissionAndStart(pendingStartMode)
     }
 
@@ -110,59 +102,35 @@ class MeetingFragment : Fragment() {
     }
 
     private fun setupClickListeners() {
-        // 预填默认会议标题
         binding.etMeetingTitle.setText(
             "会议_${java.text.SimpleDateFormat("MM-dd_HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}"
         )
 
-        // 离线录音按钮
-        binding.btnOffline.setOnClickListener {
-            startOfflineMeeting()
-        }
+        binding.btnOnline.setOnClickListener { startOnlineMeeting() }
+        binding.btnOffline.setOnClickListener { startOfflineMeeting() }
 
-        // 演示模式按钮
-        binding.btnDemo.setOnClickListener {
-            viewModel.startDemo(binding.etMeetingTitle.text.toString().trim())
-        }
-
-        // 开始/结束 按钮
         binding.btnStartEnd.setOnClickListener {
             if (viewModel.uiState.value.isMeetingActive) {
                 viewModel.endMeeting()
                 stopMeetingService()
             } else {
-                startRealMeeting()
+                startOnlineMeeting()
             }
         }
 
-        // 暂停/继续 按钮
-        binding.btnPause.setOnClickListener {
-            viewModel.togglePause()
-        }
-
-        binding.btnRetry.setOnClickListener {
-            viewModel.retryConnection()
-        }
+        binding.btnPause.setOnClickListener { viewModel.togglePause() }
+        binding.btnRetry.setOnClickListener { viewModel.retryConnection() }
     }
 
-    /** 公开：从 Home 页面跳转启动实时会议 */
-    fun startRealMeeting() {
-        requestPermissionsAndStart(StartMode.REALTIME)
-    }
+    fun startOnlineMeeting() { requestPermissionsAndStart(StartMode.ONLINE) }
+    fun startOfflineMeeting() { requestPermissionsAndStart(StartMode.OFFLINE) }
 
-    /** 公开：从 Home 页面跳转启动离线录音 */
-    fun startOfflineMeeting() {
-        requestPermissionsAndStart(StartMode.OFFLINE)
-    }
-
-    /** 公开：从 Home 页面跳转启动演示模式 */
-    fun startDemo() {
-        viewModel.startDemo(binding.etMeetingTitle.text.toString().trim())
+    fun recoverFromCrash(state: RecoveryStateEntity) {
+        viewModel.recoverFromCrash(state)
     }
 
     private fun requestPermissionsAndStart(mode: StartMode) {
         pendingStartMode = mode
-        // Android 13+ 先请求通知权限
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val hasNotification = ContextCompat.checkSelfPermission(
                 requireContext(), Manifest.permission.POST_NOTIFICATIONS
@@ -175,24 +143,13 @@ class MeetingFragment : Fragment() {
         checkAudioPermissionAndStart(mode)
     }
 
-    fun startUpload(meetingId: Long) {
-        viewModel.uploadOfflineMeeting(meetingId)
-    }
-
-    fun recoverFromCrash(state: RecoveryStateEntity) {
-        viewModel.recoverFromCrash(state)
-    }
-
     private fun checkAudioPermissionAndStart(mode: StartMode) {
         val hasAudio = ContextCompat.checkSelfPermission(
             requireContext(), Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
 
-        if (hasAudio) {
-            startMeetingWithService(mode)
-        } else {
-            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
+        if (hasAudio) startMeetingWithService(mode)
+        else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     private fun startMeetingWithService(mode: StartMode) {
@@ -203,7 +160,6 @@ class MeetingFragment : Fragment() {
             Toast.makeText(requireContext(), "无法启动前台服务：${e.message}", Toast.LENGTH_LONG).show()
             return
         } catch (e: IllegalStateException) {
-            // Android 14+ 后台启动限制
             Toast.makeText(requireContext(), "应用在后台无法启动前台服务，请返回前台后重试", Toast.LENGTH_LONG).show()
             return
         }
@@ -211,8 +167,11 @@ class MeetingFragment : Fragment() {
         val language = getSelectedLanguage()
         val tag = getSelectedTag()
         when (mode) {
-            StartMode.REALTIME -> viewModel.startMeeting(title, language, tag)
-            StartMode.OFFLINE -> viewModel.startOfflineMeeting(title, language, tag)
+            StartMode.ONLINE -> viewModel.startMeeting(title, language, tag)
+            StartMode.OFFLINE -> viewModel.startMeeting(
+                title, language, tag,
+                com.example.meetingtranscriber.engine.AsrEngineType.FUNASR_LOCAL
+            )
         }
     }
 
@@ -235,34 +194,11 @@ class MeetingFragment : Fragment() {
             viewModel.uiState.collect { state ->
                 updateUI(state)
                 adapter.setInterimText(state.interimText.takeIf { it.isNotBlank() })
-
-                if (state.showOfflineUploadPrompt) {
-                    showOfflineUploadDialog()
-                }
             }
         }
     }
 
-    private fun showOfflineUploadDialog() {
-        AlertDialog.Builder(requireContext())
-            .setTitle("离线录音已保存")
-            .setMessage("是否立即上传到云端进行AI转写？")
-            .setPositiveButton("上传") { _, _ ->
-                viewModel.dismissUploadPrompt()
-                // 切换到历史页面找到刚结束的会议
-                requireActivity().findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(
-                    R.id.bottom_navigation
-                )?.selectedItemId = R.id.nav_history
-            }
-            .setNegativeButton("稍后") { _, _ ->
-                viewModel.dismissUploadPrompt()
-            }
-            .setOnCancelListener { viewModel.dismissUploadPrompt() }
-            .show()
-    }
-
     private fun updateUI(state: MeetingUiState) {
-        // 引擎名称标签
         if (state.asrEngineName.isNotBlank()) {
             binding.tvEngineLabel.text = "当前引擎：${state.asrEngineName}"
             binding.tvEngineLabel.visibility = View.VISIBLE
@@ -270,7 +206,6 @@ class MeetingFragment : Fragment() {
             binding.tvEngineLabel.visibility = View.GONE
         }
 
-        // 摘要生成进度
         if (state.isGeneratingSummary) {
             binding.progressSummary.visibility = View.VISIBLE
             binding.progressSummary.progress = (state.summaryProgress * 100).toInt()
@@ -278,7 +213,6 @@ class MeetingFragment : Fragment() {
             binding.progressSummary.visibility = View.GONE
         }
 
-        // 连接状态横幅
         when (state.connectionState) {
             ConnectionState.RECONNECTING -> {
                 binding.layoutConnectionBanner.visibility = View.VISIBLE
@@ -296,30 +230,20 @@ class MeetingFragment : Fragment() {
                 binding.tvConnectionStatus.text = "连接失败，请检查网络后重试"
                 binding.btnRetry.visibility = View.VISIBLE
             }
-            else -> {
-                binding.layoutConnectionBanner.visibility = View.GONE
-            }
+            else -> { binding.layoutConnectionBanner.visibility = View.GONE }
         }
 
         if (state.isMeetingActive) {
             binding.layoutTitleInput.visibility = View.GONE
-            binding.btnStartEnd.text = if (state.isUploading) "上传中..." else "结束会议"
-            binding.btnStartEnd.isEnabled = !state.isUploading
+            binding.btnStartEnd.text = "结束会议"
+            binding.btnStartEnd.isEnabled = true
             binding.btnStartEnd.setBackgroundColor(
                 ContextCompat.getColor(requireContext(), R.color.error_red)
             )
-            binding.btnDemo.visibility = View.GONE
+            binding.btnOnline.visibility = View.GONE
             binding.btnOffline.visibility = View.GONE
-            binding.btnPause.visibility = if (state.isOfflineMode || state.isUploading) View.GONE else View.VISIBLE
+            binding.btnPause.visibility = View.VISIBLE
             binding.btnPause.text = if (state.isPaused) "继续" else "暂停"
-
-            // 演示/离线模式标签
-            binding.tvDemoBadge.visibility = when {
-                state.isDemoMode -> { binding.tvDemoBadge.text = "● 演示模式 — 模拟 3 人会议对话"; View.VISIBLE }
-                state.isOfflineMode -> { binding.tvDemoBadge.text = "● 离线录音 — 音频保存到本地"; View.VISIBLE }
-                state.isUploading -> { binding.tvDemoBadge.text = "● 正在上传离线录音到云端转写..."; View.VISIBLE }
-                else -> View.GONE
-            }
 
             val h = state.elapsedSeconds / 3600
             val m = (state.elapsedSeconds % 3600) / 60
@@ -344,10 +268,9 @@ class MeetingFragment : Fragment() {
             binding.btnStartEnd.setBackgroundColor(
                 ContextCompat.getColor(requireContext(), R.color.primary)
             )
-            binding.btnDemo.visibility = View.VISIBLE
+            binding.btnOnline.visibility = View.VISIBLE
             binding.btnOffline.visibility = View.VISIBLE
             binding.btnPause.visibility = View.GONE
-            binding.tvDemoBadge.visibility = View.GONE
             binding.tvTimer.text = "00:00:00"
             binding.ivStatus.background?.setTint(
                 ContextCompat.getColor(requireContext(), R.color.interim_text)

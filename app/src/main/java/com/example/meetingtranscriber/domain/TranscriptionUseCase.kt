@@ -92,7 +92,7 @@ class TranscriptionUseCase(
             _engineStatus.value = EngineStatus(EngineState.LOADING, "正在解析引擎...")
 
             // 1. 解析引擎
-            engine = engineRouter.resolveAsrEngine(context)
+            engine = engineRouter.resolveAsrEngine(context, engineTypeOverride)
             Log.i(TAG, "已解析引擎: ${engine!!.type.displayName}")
             _currentEngine.value = engine!!.type
 

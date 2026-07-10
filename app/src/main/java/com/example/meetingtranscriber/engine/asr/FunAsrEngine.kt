@@ -17,23 +17,23 @@ import java.nio.ByteOrder
 /**
  * FunASR 离线语音转写引擎。
  *
- * 基于 sherpa-onnx SenseVoiceSmall INT8 模型，完全本地运行。
- * 模型文件打包在 APK assets 中，首次启动自动拷贝到 filesDir/models/。
+ * 基于 sherpa-onnx SenseVoiceSmall 模型，完全本地运行。
+ * SenseVoice 只支持 OfflineRecognizer（非流式），因此使用
+ * 伪流式：累积音频 → 定时 decode → 逐次返回中间结果。
  *
  * 技术参数:
- * - 模型: SenseVoiceSmall INT8 (~227MB ONNX + 309KB tokens)
- * - sherpa-onnx: 1.12.29 (Zipformer2Ctc online model)
+ * - 模型: SenseVoiceSmall (~227MB ONNX + 309KB tokens)
+ * - sherpa-onnx: 1.12.29
  * - 输入: PCM 16kHz / 16bit / mono
- * - 断句: 1 秒无语音断句，最长 20 秒强制断句，最短 0.5 秒
- * - 支持: 普通话、四川话、粤语 (zh/en/ja/ko/yue)
+ * - 支持: 普通话、粤语、英语、中英混合 (auto/zh/en/yue)
  */
 class FunAsrEngine(private val context: Context) : AsrEngine {
 
     override val type: AsrEngineType = AsrEngineType.FUNASR_LOCAL
 
     private val initLock = Any()
-    private var recognizer: OnlineRecognizer? = null
-    private var stream: OnlineStream? = null
+    private var recognizer: OfflineRecognizer? = null
+    private var stream: OfflineStream? = null
 
     private val _interimText = MutableStateFlow("")
     override val interimText: StateFlow<String> = _interimText
@@ -46,6 +46,9 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
 
     private var totalBytesProcessed = 0L
     private var sentenceIndex = 0L
+    private var lastDecodedBytes = 0L
+    /** 每累积 N 字节音频做一次 decode（~0.5 秒） */
+    private val decodeIntervalBytes = SAMPLE_RATE * BYTES_PER_SAMPLE / 2
 
     override suspend fun initialize(context: Context): Result<Unit> {
         val current = _engineStatus.value
@@ -55,7 +58,6 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
 
         return withContext(Dispatchers.IO) {
             synchronized(initLock) {
-                // 二次检查：可能在排队期间已被其他线程初始化
                 val recheck = _engineStatus.value
                 if (recheck.state == EngineState.READY || recheck.state == EngineState.RUNNING) {
                     return@withContext Result.success(Unit)
@@ -68,45 +70,34 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                     val tokensFile = ensureTokensFile()
                     Log.i(TAG, "模型路径: ${modelFile.absolutePath} (${modelFile.length()} bytes)")
 
-                    val config = OnlineRecognizerConfig(
-                        featConfig = FeatureConfig(
-                            sampleRate = SAMPLE_RATE,
-                            featureDim = FEATURE_DIM
-                        ),
-                        modelConfig = OnlineModelConfig(
-                            zipformer2Ctc = OnlineZipformer2CtcModelConfig(
-                                model = modelFile.absolutePath
-                            ),
-                            tokens = tokensFile.absolutePath
-                        ),
-                        endpointConfig = EndpointConfig(
-                            rule1 = EndpointRule(
-                                mustContainNonSilence = false,
-                                minTrailingSilence = ENDPOINT_SILENCE_SEC,
-                                minUtteranceLength = MIN_UTTERANCE_SEC
-                            ),
-                            rule2 = EndpointRule(
-                                mustContainNonSilence = false,
-                                minTrailingSilence = 10.0f,
-                                minUtteranceLength = MAX_UTTERANCE_SEC
-                            )
-                        ),
-                        enableEndpoint = true
+                    val senseVoiceConfig = OfflineSenseVoiceModelConfig(
+                        model = modelFile.absolutePath,
+                        language = "auto"
                     )
 
-                    recognizer = OnlineRecognizer(
+                    val modelConfig = OfflineModelConfig(
+                        senseVoice = senseVoiceConfig,
+                        tokens = tokensFile.absolutePath,
+                        numThreads = 2,
+                        provider = "cpu",
+                        debug = false
+                    )
+
+                    val config = OfflineRecognizerConfig(modelConfig = modelConfig)
+
+                    recognizer = OfflineRecognizer(
                         null,  // 使用绝对路径加载，不通过 AssetManager
                         config
                     )
                     _engineStatus.value = EngineStatus(EngineState.READY, "模型已就绪")
-                    Log.i(TAG, "FunASR 引擎初始化成功")
+                    Log.i(TAG, "FunASR 引擎初始化成功 (SenseVoice OfflineRecognizer)")
                     Result.success(Unit)
                 } catch (e: Exception) {
                     Log.e(TAG, "FunASR 引擎初始化失败", e)
                     _engineStatus.value = EngineStatus(EngineState.ERROR, "模型加载失败: ${e.message}")
                     Result.failure(e)
                 }
-            } // synchronized(initLock)
+            }
         }
     }
 
@@ -117,12 +108,9 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                     IllegalStateException("引擎未初始化，请先调用 initialize()")
                 )
                 try {
-                    // 释放旧 stream（防止重复 start 导致 native 内存泄漏）
-                    stream?.let { rec.reset(it) }
-                    stream = null
-
-                    stream = rec.createStream("")
+                    stream = rec.createStream()
                     totalBytesProcessed = 0L
+                    lastDecodedBytes = 0L
                     sentenceIndex = 0L
                     _interimText.value = ""
                     _engineStatus.value = EngineStatus(EngineState.RUNNING)
@@ -133,7 +121,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                     _engineStatus.value = EngineStatus(EngineState.ERROR, "启动失败: ${e.message}")
                     Result.failure(e)
                 }
-            } // synchronized(initLock)
+            }
         }
     }
 
@@ -158,38 +146,17 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                 }
 
             currentStream.acceptWaveform(samples, SAMPLE_RATE)
-
-            // 更新计时
             totalBytesProcessed += pcmData.size
-            val elapsedMs = totalBytesProcessed / BYTES_PER_MS
 
-            // 解码循环
-            while (rec.isReady(currentStream)) {
+            // 每 ~0.5 秒音频做一次 decode（伪流式）
+            if (totalBytesProcessed - lastDecodedBytes >= decodeIntervalBytes) {
                 rec.decode(currentStream)
                 val result = rec.getResult(currentStream)
 
                 if (result.text.isNotBlank()) {
-                    // 检查是否为完整句子（通过 endpoint 检测）
-                    if (rec.isEndpoint(currentStream)) {
-                        sentenceIndex++
-                        val sentence = AsrSentence(
-                            text = result.text.trim(),
-                            sentenceId = sentenceIndex,
-                            speakerId = "speaker_0",
-                            startTimeMs = (elapsedMs - 2000L).coerceAtLeast(0),
-                            endTimeMs = elapsedMs,
-                            isFinal = true
-                        )
-                        _sentenceResults.tryEmit(sentence)
-                        _interimText.value = ""
-                        Log.d(TAG, "句子 #$sentenceIndex: ${sentence.text.take(50)}...")
-                        // Reset stream after endpoint
-                        rec.reset(currentStream)
-                    } else {
-                        // 中间结果
-                        _interimText.value = result.text.trim()
-                    }
+                    _interimText.value = result.text.trim()
                 }
+                lastDecodedBytes = totalBytesProcessed
             }
         } catch (e: Exception) {
             Log.e(TAG, "处理音频帧异常", e)
@@ -202,24 +169,23 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
         val currentStream = stream ?: return
 
         try {
-            currentStream.inputFinished()
-            while (rec.isReady(currentStream)) {
-                rec.decode(currentStream)
-                val result = rec.getResult(currentStream)
-                if (result.text.isNotBlank()) {
-                    sentenceIndex++
-                    val elapsedMs = totalBytesProcessed / BYTES_PER_MS
-                    _sentenceResults.tryEmit(
-                        AsrSentence(
-                            text = result.text.trim(),
-                            sentenceId = sentenceIndex,
-                            speakerId = "speaker_0",
-                            startTimeMs = (elapsedMs - 2000L).coerceAtLeast(0),
-                            endTimeMs = elapsedMs,
-                            isFinal = true
-                        )
+            // 最后一次 decode，获取完整结果
+            rec.decode(currentStream)
+            val result = rec.getResult(currentStream)
+
+            if (result.text.isNotBlank()) {
+                sentenceIndex++
+                val elapsedMs = totalBytesProcessed / BYTES_PER_MS
+                _sentenceResults.tryEmit(
+                    AsrSentence(
+                        text = result.text.trim(),
+                        sentenceId = sentenceIndex,
+                        speakerId = "speaker_0",
+                        startTimeMs = 0,
+                        endTimeMs = elapsedMs,
+                        isFinal = true
                     )
-                }
+                )
             }
             _interimText.value = ""
             Log.i(TAG, "finalize 完成，共 $sentenceIndex 句")
@@ -233,7 +199,6 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
         withContext(Dispatchers.IO) {
             synchronized(initLock) {
                 try {
-                    stream?.let { recognizer?.reset(it) }
                     recognizer?.release()
                 } catch (e: Exception) {
                     Log.e(TAG, "dispose 异常", e)
@@ -270,7 +235,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                 }
             } catch (e: Exception) {
                 tmpFile.delete()
-                modelFile.delete()  // 清理可能的半成品
+                modelFile.delete()
                 throw e
             }
             val elapsed = (System.currentTimeMillis() - startTime) / 1000
@@ -296,13 +261,8 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
         private const val TAG = "FunAsrEngine"
 
         const val SAMPLE_RATE = 16000
-        private const val FEATURE_DIM = 80
         private const val BYTES_PER_SAMPLE = 2
         private const val BYTES_PER_MS = (SAMPLE_RATE * BYTES_PER_SAMPLE) / 1000
-
-        private const val ENDPOINT_SILENCE_SEC = 1.0f
-        private const val MAX_UTTERANCE_SEC = 20.0f
-        private const val MIN_UTTERANCE_SEC = 0.5f
 
         const val MODEL_DIR = "models"
         const val ASSET_MODEL_PATH = "models"

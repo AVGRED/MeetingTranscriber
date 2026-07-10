@@ -39,7 +39,17 @@
             android:fontFamily="monospace"
             tools:text="00:23:15" />
 
-        <!-- 离线录音按钮（未开会时显示） -->
+        <!-- 在线会议按钮（未开会时显示） -->
+        <Button
+            android:id="@+id/btn_online"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="在线"
+            android:textColor="@color/primary"
+            android:visibility="visible" />
+
+        <!-- 离线会议按钮（未开会时显示） -->
         <Button
             android:id="@+id/btn_offline"
             style="@style/Widget.Material3.Button.TextButton"
@@ -47,16 +57,6 @@
             android:layout_height="wrap_content"
             android:text="离线"
             android:textColor="#FF9800"
-            android:visibility="visible" />
-
-        <!-- 演示按钮（未开会时显示） -->
-        <Button
-            android:id="@+id/btn_demo"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="演示"
-            android:textColor="@color/accent"
             android:visibility="visible" />
 
         <!-- 暂停按钮（会议中显示） -->
@@ -144,20 +144,6 @@
         android:background="@color/surface_variant"
         app:layout_constraintTop_toBottomOf="@id/layout_title_input" />
 
-    <!-- 演示模式提示条 -->
-    <TextView
-        android:id="@+id/tv_demo_badge"
-        android:layout_width="match_parent"
-        android:layout_height="24dp"
-        android:text="● 演示模式 — 模拟 3 人会议对话"
-        android:textSize="11sp"
-        android:textColor="@color/on_primary"
-        android:gravity="center"
-        android:background="#FF9800"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/tv_engine_label"
-        tools:visibility="visible" />
-
     <!-- 连接状态提示条（重连/失败时显示） -->
     <LinearLayout
         android:id="@+id/layout_connection_banner"
@@ -167,7 +153,7 @@
         android:orientation="horizontal"
         android:background="#FF9800"
         android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/tv_demo_badge"
+        app:layout_constraintTop_toBottomOf="@id/tv_engine_label"
         tools:visibility="visible">
 
         <TextView

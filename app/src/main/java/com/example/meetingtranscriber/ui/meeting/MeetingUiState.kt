@@ -11,9 +11,7 @@ data class MeetingUiState(
     val isPaused: Boolean = false,
     val isConnected: Boolean = false,
     val isDemoMode: Boolean = false,
-    val isOfflineMode: Boolean = false,
     val isSpeaking: Boolean = false,
-    val isUploading: Boolean = false,
     val elapsedSeconds: Int = 0,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val interimText: String = "",
@@ -21,7 +19,6 @@ data class MeetingUiState(
     val speakerCount: Int = 0,
     val errorMessage: String? = null,
     val selectedLanguage: String = "cn",
-    val showOfflineUploadPrompt: Boolean = false,
 
     // ── 新增：引擎信息 ──
     /** 当前 ASR 引擎名称（如 "FunASR 云端"） */
