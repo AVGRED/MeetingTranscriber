@@ -13,7 +13,6 @@ class MeetingUiStateTest {
         assertFalse(state.isMeetingActive)
         assertFalse(state.isPaused)
         assertFalse(state.isConnected)
-        assertFalse(state.isDemoMode)
         assertFalse(state.isSpeaking)
         assertEquals(0, state.elapsedSeconds)
         assertEquals(ConnectionState.DISCONNECTED, state.connectionState)
@@ -34,7 +33,6 @@ class MeetingUiStateTest {
             isMeetingActive = true,
             isPaused = false,
             isConnected = true,
-            isDemoMode = false,
             errorMessage = null,
             selectedLanguage = "yue"
         )
@@ -85,7 +83,6 @@ class MeetingUiStateTest {
             isMeetingActive = true,
             isPaused = false,
             isConnected = true,
-            isDemoMode = true,
             interimText = "some text",
             asrEngineName = "FunASR 云端",
             errorMessage = null
@@ -95,13 +92,11 @@ class MeetingUiStateTest {
             isPaused = false,
             interimText = "",
             isConnected = false,
-            isDemoMode = false,
             asrEngineName = ""
         )
         assertFalse(ended.isMeetingActive)
         assertEquals("", ended.interimText)
         assertFalse(ended.isConnected)
-        assertFalse(ended.isDemoMode)
         assertEquals("", ended.asrEngineName)
     }
 

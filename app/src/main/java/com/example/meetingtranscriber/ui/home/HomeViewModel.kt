@@ -59,6 +59,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         .map { it.percent }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    /** 是否需要下载 Qwen 模型（偏好本地 LLM + 模型未下载 + 未在下载中） */
+    val isModelDownloadNeeded: StateFlow<Boolean> = combine(
+        modelDownloadProgress,
+        MutableStateFlow(prefs.preferredLlmEngine)
+    ) { progress, preferred ->
+        preferred == LlmEngineType.QWEN_LOCAL &&
+        progress.status != ModelDownloadManager.DownloadState.Status.COMPLETED &&
+        progress.status != ModelDownloadManager.DownloadState.Status.DOWNLOADING &&
+        progress.status != ModelDownloadManager.DownloadState.Status.VERIFYING
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     // ── 统计 ──
 
     private val _meetingCount = MutableStateFlow(0)
@@ -128,6 +139,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             NetworkMonitor.networkState.collect { available ->
                 (networkAvailable as MutableStateFlow).value = available
+            }
+        }
+    }
+
+    /** 触发 Qwen 模型下载 */
+    fun downloadQwenModel() {
+        viewModelScope.launch {
+            modelDownloadManager.download().onFailure { e ->
+                android.util.Log.e("HomeViewModel", "模型下载失败: ${e.message}")
             }
         }
     }

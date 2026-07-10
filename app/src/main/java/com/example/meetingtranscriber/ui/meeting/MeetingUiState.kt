@@ -10,7 +10,6 @@ data class MeetingUiState(
     val isMeetingActive: Boolean = false,
     val isPaused: Boolean = false,
     val isConnected: Boolean = false,
-    val isDemoMode: Boolean = false,
     val isSpeaking: Boolean = false,
     val elapsedSeconds: Int = 0,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,

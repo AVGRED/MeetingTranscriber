@@ -63,8 +63,13 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     /** 已处理的 ASR 句子数（避免重复 append） */
     private var processedSentenceCount = 0
 
+    /** VAD 连续沉默帧计数器（用于说话人切换检测） */
+    private var speakerGapFrames = 0
+    /** 两个说话人之间的最小沉默帧数（CHUNK_MS=100ms → 20帧=2秒） */
+    private val speakerGapThresholdFrames = 20
+
     init {
-        // --- 真实模式：监听音频 → VAD 过滤 → TranscriptionUseCase → EngineRouter ---
+        // --- 真实模式：监听音频 → VAD 过滤（含说话人切换检测）→ EngineRouter ---
         viewModelScope.launch {
             audioCaptureManager.audioStream.collect { pcmData ->
                 if (_uiState.value.isMeetingActive && !_uiState.value.isPaused) {
@@ -75,7 +80,19 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                         _uiState.update { it.copy(isSpeaking = isVoice) }
                     }
                     if (isVoice) {
+                        // 长时沉默后语音恢复 → 检测到新说话人
+                        if (speakerGapFrames >= speakerGapThresholdFrames) {
+                            transcriptionUseCase.switchSpeaker()
+                            android.util.Log.d("MeetingViewModel",
+                                "检测到说话人切换（沉默 ${speakerGapFrames * 100}ms）")
+                        }
+                        speakerGapFrames = 0
                         transcriptionUseCase.processAudio(pcmData)
+                    } else {
+                        // 防止计数溢出
+                        if (speakerGapFrames < speakerGapThresholdFrames + 50) {
+                            speakerGapFrames++
+                        }
                     }
                 }
             }
@@ -205,6 +222,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             return false
         }
         processedSentenceCount = 0
+        speakerGapFrames = 0
         vadDetector.reset()
         return true
     }

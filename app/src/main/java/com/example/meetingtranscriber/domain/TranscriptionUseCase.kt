@@ -209,6 +209,14 @@ class TranscriptionUseCase(
     }
 
     /**
+     * 切换说话人 — 通知引擎当前语音段结束，下个语音段是另一个说话人。
+     * 由 VAD 长时沉默检测触发。
+     */
+    fun switchSpeaker() {
+        (engine as? com.example.meetingtranscriber.engine.asr.FunAsrEngine)?.startNewSpeakerTurn()
+    }
+
+    /**
      * 取消转写（不保留结果）。
      */
     suspend fun cancel() {

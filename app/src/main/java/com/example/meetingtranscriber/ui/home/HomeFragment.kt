@@ -52,6 +52,9 @@ class HomeFragment : Fragment() {
         binding.btnViewAll.setOnClickListener {
             (requireActivity() as MainActivity).navigateToTab(R.id.nav_history)
         }
+        binding.btnDownloadModel.setOnClickListener {
+            viewModel.downloadQwenModel()
+        }
     }
 
     private fun observeState() {
@@ -86,6 +89,14 @@ class HomeFragment : Fragment() {
                         if (hasKey) R.color.status_recording else R.color.status_paused
                     )
                 )
+            }
+        }
+
+        // 下载按钮显示/隐藏
+        scope.launch {
+            viewModel.isModelDownloadNeeded.collect { needed ->
+                binding.btnDownloadModel.visibility =
+                    if (needed) View.VISIBLE else View.GONE
             }
         }
 

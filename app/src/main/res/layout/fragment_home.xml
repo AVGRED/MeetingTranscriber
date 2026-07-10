@@ -140,6 +140,18 @@
             android:textColor="@color/on_surface_variant"
             android:visibility="gone" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_download_model"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginTop="8dp"
+            android:text="下载 Qwen 本地模型"
+            android:textSize="13sp"
+            app:cornerRadius="20dp"
+            app:icon="@android:drawable/stat_sys_download"
+            android:visibility="gone" />
+
         <!-- 快速开始 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"

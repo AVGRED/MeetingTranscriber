@@ -37,7 +37,8 @@ data class VocabularyWordEntity(
     foreignKeys = [
         ForeignKey(entity = VocabularyEntity::class, parentColumns = ["id"], childColumns = ["vocabularyId"], onDelete = ForeignKey.CASCADE),
         ForeignKey(entity = MeetingEntity::class, parentColumns = ["id"], childColumns = ["meetingId"], onDelete = ForeignKey.CASCADE)
-    ]
+    ],
+    indices = [Index("meetingId")]
 )
 data class VocabularyMeetingCrossRef(
     val vocabularyId: Long,

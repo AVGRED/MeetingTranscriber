@@ -47,6 +47,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
     private var totalBytesProcessed = 0L
     private var sentenceIndex = 0L
     private var lastDecodedBytes = 0L
+    @Volatile private var currentSpeakerIndex = 0
     /** 每累积 N 字节音频做一次 decode（~0.5 秒） */
     private val decodeIntervalBytes = SAMPLE_RATE * BYTES_PER_SAMPLE / 2
 
@@ -112,6 +113,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                     totalBytesProcessed = 0L
                     lastDecodedBytes = 0L
                     sentenceIndex = 0L
+                    currentSpeakerIndex = 0
                     _interimText.value = ""
                     _engineStatus.value = EngineStatus(EngineState.RUNNING)
                     Log.i(TAG, "转写流已创建")
@@ -180,8 +182,8 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                     AsrSentence(
                         text = result.text.trim(),
                         sentenceId = sentenceIndex,
-                        speakerId = "speaker_0",
-                        startTimeMs = 0,
+                        speakerId = "speaker_$currentSpeakerIndex",
+                        startTimeMs = maxOf(0, elapsedMs - 5000),
                         endTimeMs = elapsedMs,
                         isFinal = true
                     )
@@ -193,6 +195,22 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
             Log.e(TAG, "finalize 异常", e)
             _engineStatus.value = EngineStatus(EngineState.ERROR, "最终处理异常: ${e.message}")
         }
+    }
+
+    /**
+     * 切换说话人 — 结束当前语音段，为下一个说话人创建新流。
+     * 基于 VAD 检测到的长时间沉默触发（通常 2 秒以上）。
+     */
+    fun startNewSpeakerTurn() {
+        // 先结束当前流
+        finalize()
+        // 创建新流
+        val rec = recognizer ?: return
+        stream = rec.createStream()
+        currentSpeakerIndex++
+        lastDecodedBytes = totalBytesProcessed
+        _interimText.value = ""
+        Log.i(TAG, "切换到说话人 speaker_$currentSpeakerIndex")
     }
 
     override suspend fun dispose() {
