@@ -134,9 +134,10 @@ class MainActivity : AppCompatActivity() {
             supportFragmentManager.fragments.forEach {
                 if (it.isVisible && it !== existing) {
                     hide(it)
-                    // 降级到 CREATED：view 保留（切回无白屏），但 STARTED 门槛的
-                    // repeatOnLifecycle 收集器全部停跑——隐藏 Tab 不再消耗主线程
-                    setMaxLifecycle(it, androidx.lifecycle.Lifecycle.State.CREATED)
+                    // 降级到 STARTED（不能用 CREATED——CREATED 会销毁 view，且经
+                    // 详情页 back stack 操作后可能恢复不回来 → 白屏，真机已踩坑）。
+                    // 收集器门槛为 RESUMED：STARTED 的隐藏 Tab 收集器照样停跑
+                    setMaxLifecycle(it, androidx.lifecycle.Lifecycle.State.STARTED)
                 }
             }
             if (existing != null) {

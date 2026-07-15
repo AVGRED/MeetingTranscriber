@@ -108,15 +108,24 @@ class MeetingApplication : Application() {
         }
     }
 
-    private fun cleanupExpiredRecordings() {
+    /** 清理孤儿录音：只删数据库中已无会议行引用的文件（会议删除/归档清除后遗留）。
+     *  不再按 30 天龄删除——会议记录的录音须永久可回放（用户要求每场记录完整）；
+     *  留 1 天缓冲防止误删刚创建、行尚未提交的文件 */
+    private suspend fun cleanupExpiredRecordings() {
         val recordingsDir = getExternalFilesDir("realtime_recordings") ?: return
-        val thirtyDaysMs = 30L * 24 * 3600 * 1000
-        val cutoff = System.currentTimeMillis() - thirtyDaysMs
-        recordingsDir.listFiles()?.forEach { file ->
-            if (file.lastModified() < cutoff) {
-                file.delete()
-                Log.i("MeetingApplication", "已清理过期录音: ${file.name}")
+        try {
+            val referenced = AppDatabase.getInstance(this).meetingDao()
+                .getAllAudioPaths().toHashSet()
+            val dayMs = 24 * 3600 * 1000L
+            recordingsDir.listFiles()?.forEach { file ->
+                if (file.absolutePath !in referenced &&
+                    System.currentTimeMillis() - file.lastModified() > dayMs) {
+                    file.delete()
+                    Log.i("MeetingApplication", "已清理孤儿录音: ${file.name}")
+                }
             }
+        } catch (e: Exception) {
+            Log.w("MeetingApplication", "清理孤儿录音失败: ${e.message}")
         }
     }
 

@@ -24,6 +24,10 @@ interface MeetingDao {
     @Query("SELECT * FROM meetings WHERE isArchived = 0 ORDER BY startTime DESC")
     suspend fun getAllMeetingsOnce(): List<MeetingEntity>
 
+    /** 全部会议（含归档）引用的录音路径——孤儿录音清理用，归档会议的录音同样不可删 */
+    @Query("SELECT audioFilePath FROM meetings WHERE audioFilePath IS NOT NULL")
+    suspend fun getAllAudioPaths(): List<String>
+
     @Query("SELECT * FROM meetings WHERE id = :meetingId")
     suspend fun getById(meetingId: Long): MeetingEntity?
 

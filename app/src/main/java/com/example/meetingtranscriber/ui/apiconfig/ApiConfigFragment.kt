@@ -157,11 +157,11 @@ class ApiConfigFragment : Fragment() {
     // ═══════════════════════════════════════════════════════════
 
     private fun observeState() {
-        // 引擎偏好/开关：repeatOnLifecycle(STARTED)——Tab 隐藏时停收；
+        // 引擎偏好/开关：repeatOnLifecycle(RESUMED)——Tab 隐藏时停收；
         // 同时改用 viewLifecycleOwner（原 fragment lifecycleScope 会在视图
         // 重建时堆叠收集器并触碰过期 binding）
         viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 // ASR preference
                 launch {
                     viewModel.preferredAsrEngine.collect { type ->

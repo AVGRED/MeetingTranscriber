@@ -140,10 +140,10 @@ class HomeFragment : Fragment() {
     }
 
     private fun observeState() {
-        // repeatOnLifecycle(STARTED)：Tab 被 setMaxLifecycle(CREATED) 降级隐藏时
+        // repeatOnLifecycle(RESUMED)：Tab 被 setMaxLifecycle(STARTED) 降级隐藏时
         // 全部收集器自动停跑，切回时自动恢复并重放最新 StateFlow 值
         viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
 
         // 引擎状态
         launch {

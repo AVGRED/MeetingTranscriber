@@ -183,10 +183,10 @@ class MeetingFragment : Fragment() {
     }
 
     private fun observeState() {
-        // repeatOnLifecycle(STARTED)：Tab 隐藏时停收（会议逻辑全在 ViewModel，
+        // repeatOnLifecycle(RESUMED)：Tab 隐藏时停收（会议逻辑全在 ViewModel，
         // 录音/转写不受影响），切回时 StateFlow 重放最新状态恢复 UI
         viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
                 launch {
                     viewModel.segments.collectLatest { segments ->
                         adapter.submitSegments(segments) {

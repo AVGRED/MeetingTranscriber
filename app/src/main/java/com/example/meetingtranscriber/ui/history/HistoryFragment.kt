@@ -104,9 +104,9 @@ class HistoryFragment : Fragment() {
         // 标签筛选 chips
         setupTagChips()
 
-        // repeatOnLifecycle(STARTED)：Tab 隐藏时停收 Room Flow，切回自动恢复
+        // repeatOnLifecycle(RESUMED)：Tab 隐藏时停收 Room Flow，切回自动恢复
         viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
                 launch {
                     viewModel.meetings.collect { meetings ->
                         adapter.submitList(meetings)

@@ -124,7 +124,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 统计 + 最近会议合并为一次全表查询（原先 loadStats/loadRecentMeetings 各查一遍） */
     private fun loadHomeData() {
         viewModelScope.launch {
-            val meetings = repo.getAllMeetingsOnce()
+            // 首次触碰 lazy db 必须在 IO：getInstance 可能触发明文迁移/SQLCipher 打开
+            //（真机实测迁移 166ms，若 lazy 在 Main 协程解析就会抢在主线程执行）
+            val meetings = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                repo.getAllMeetingsOnce()
+            }
             _meetingCount.value = meetings.size
             _recentMeetings.value = meetings.filter { !it.isArchived }.take(3)
             // 条录音 = 录音文件仍存在的会议数（30 天清理后不再计入，与实际可播放的录音对齐）

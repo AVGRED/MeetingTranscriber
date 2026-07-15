@@ -154,9 +154,9 @@ class SettingsFragment : Fragment() {
             updateStorageInfo()
         }
 
-        // repeatOnLifecycle(STARTED)：Tab 隐藏时停收，切回自动恢复
+        // repeatOnLifecycle(RESUMED)：Tab 隐藏时停收，切回自动恢复
         viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
                 launch {
                     viewModel.vocabularies.collectLatest { list ->
                         adapter.submitList(list)

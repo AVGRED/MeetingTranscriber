@@ -283,10 +283,13 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 }
                 wavRecorder = recorder
                 if (recorder == null) {
-                    android.util.Log.w("MeetingViewModel", "实时音频存档启动失败")
-                } else {
-                    meetingRepository.updateAudioFilePath(currentMeetingId, wavFile.absolutePath)
+                    // 录音存档是会议记录完整性的硬要求：启动失败直接中止并明确报错，
+                    // 不再静默继续（那会产生"有转写没录音"的残缺记录）
+                    _uiState.update { it.copy(errorMessage = "录音存档创建失败（检查存储空间后重试）") }
+                    abortStartup(createdMeetingId)
+                    return@launch
                 }
+                meetingRepository.updateAudioFilePath(currentMeetingId, wavFile.absolutePath)
 
                 if (!connectAsr(language, engineTypeOverride)) {
                     abortStartup(createdMeetingId)
@@ -391,10 +394,10 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             stopRecoverySaver()
 
             audioCaptureManager.stop()
-            wavRecorder?.stop()
-            // 等待 SharedFlow 中残余帧被消费（~100ms 缓冲），
-            // 确保尾音进入 ASR stream 后再 finalize，避免最后一帧丢失
+            // 先等残余帧被双通道消费完（WAV 写盘 + ASR 喂入），再关录音文件——
+            // 通道消费是异步的，先 stop() 会把仍在 wavChannel 里的尾音丢掉
             delay(150)
+            wavRecorder?.stop()
             wavRecorder = null
             // 声纹判定最后一轮（需在引擎释放前取当前轮次 id）
             if (voiceprintEnabled) {
@@ -691,7 +694,9 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             }
             audioCaptureManager.stop()
             viewModelScope.launch { transcriptionUseCase.cancel() }
-            wavRecorder?.cancel()
+            // stop() 而非 cancel()：cancel 会删除录音文件——会议进行中 ViewModel
+            // 被销毁（进程回收等）时必须保留已录内容，配合恢复机制续会
+            wavRecorder?.stop()
             wavRecorder = null
         }
         voiceprint.release()
