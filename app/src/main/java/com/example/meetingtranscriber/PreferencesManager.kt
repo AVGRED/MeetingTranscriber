@@ -79,6 +79,28 @@ class PreferencesManager(context: Context) {
         set(value) = securePrefs.edit().putString(KEY_VOLC_ASR_TOKEN, value).apply()
 
     // ═══════════════════════════════════════════════════════
+    // 通用云端 LLM 密钥/型号（按引擎类型区分；DeepSeek/Kimi/智谱/
+    // 硅基流动等 OpenAI 兼容厂家 + DashScope 型号选择共用）
+    // ═══════════════════════════════════════════════════════
+
+    /** 云端 LLM API Key（加密存储） */
+    fun getLlmApiKey(type: LlmEngineType): String =
+        securePrefs.getString("$KEY_LLM_API_KEY_PREFIX${type.name}", "") ?: ""
+
+    fun setLlmApiKey(type: LlmEngineType, value: String) =
+        securePrefs.edit().putString("$KEY_LLM_API_KEY_PREFIX${type.name}", value).apply()
+
+    /** 云端 LLM 型号 ID（非敏感，明文存储；空串 = 用引擎默认型号） */
+    fun getLlmModel(type: LlmEngineType): String =
+        plainPrefs.getString("$KEY_LLM_MODEL_PREFIX${type.name}", "") ?: ""
+
+    fun setLlmModel(type: LlmEngineType, value: String) =
+        plainPrefs.edit().putString("$KEY_LLM_MODEL_PREFIX${type.name}", value).apply()
+
+    /** 指定云端 LLM 的 Key 是否已配置 */
+    fun hasLlmKey(type: LlmEngineType): Boolean = getLlmApiKey(type).isNotBlank()
+
+    // ═══════════════════════════════════════════════════════
     // 引擎偏好 (明文存储)
     // ═══════════════════════════════════════════════════════
 
@@ -146,7 +168,8 @@ class PreferencesManager(context: Context) {
     fun hasAnyCloudAsrKey(): Boolean = hasFunAsrCloudUrl() || hasTingwuKeys() || hasVolcengineKeys()
 
     /** 是否有任何云端 LLM Key */
-    fun hasAnyCloudLlmKey(): Boolean = hasArkKey() || hasDashScopeKey()
+    fun hasAnyCloudLlmKey(): Boolean = hasArkKey() || hasDashScopeKey() ||
+        LlmEngineType.entries.any { it.isCloud && hasLlmKey(it) }
 
     /** FunASR 云端地址是否已配置 */
     fun hasFunAsrCloudUrl(): Boolean = funasrCloudUrl.isNotBlank()
@@ -192,6 +215,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_DASHSCOPE_API_KEY = "dashscope_api_key"
         private const val KEY_VOLC_ASR_API_KEY = "volcengine_asr_api_key"
         private const val KEY_VOLC_ASR_TOKEN = "volcengine_asr_access_token"
+        private const val KEY_LLM_API_KEY_PREFIX = "llm_api_key_"
 
         // 明文 Key
         private const val KEY_ASR_ENGINE = "preferred_asr_engine"
@@ -200,5 +224,6 @@ class PreferencesManager(context: Context) {
         private const val KEY_SUMMARY_STYLE = "summary_style"
         private const val KEY_BACKGROUND_SILENT = "background_silent"
         private const val KEY_FUNASR_CLOUD_URL = "funasr_cloud_url"
+        private const val KEY_LLM_MODEL_PREFIX = "llm_model_"
     }
 }

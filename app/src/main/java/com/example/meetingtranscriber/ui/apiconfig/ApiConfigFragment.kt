@@ -12,6 +12,9 @@ import androidx.fragment.app.viewModels
 import com.example.meetingtranscriber.databinding.FragmentApiConfigBinding
 import com.example.meetingtranscriber.engine.AsrEngineType
 import com.example.meetingtranscriber.engine.LlmEngineType
+import com.example.meetingtranscriber.engine.llm.DashScopeEngine
+import com.example.meetingtranscriber.engine.llm.DoubaoEngine
+import com.example.meetingtranscriber.engine.llm.OpenAiCompatProvider
 import kotlinx.coroutines.launch
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -73,12 +76,24 @@ class ApiConfigFragment : Fragment() {
             val engineType = LlmEngineType.entries[position]
             viewModel.setPreferredLlmEngine(engineType)
             updateLlmCardVisibility(engineType)
+            // 换厂家时把该厂家已存的 Key/型号换装进共用卡片（只在显式切换时拉取，
+            // 避免切回 Tab 重放时覆盖未保存输入）
+            viewModel.refreshCompatFields(engineType)
         }
+        // 型号预置列表（可编辑下拉，支持手动输入新型号）
+        binding.dropdownDashscopeModel.setSimpleItems(DashScopeEngine.PRESET_MODELS.toTypedArray())
+        binding.etArkEndpointId.setSimpleItems(DoubaoEngine.PRESET_MODELS.toTypedArray())
     }
 
     private fun updateLlmCardVisibility(type: LlmEngineType) {
         binding.cardDoubao.visibility = if (type == LlmEngineType.DOUBAO_CLOUD) View.VISIBLE else View.GONE
         binding.cardDashscope.visibility = if (type == LlmEngineType.DASHSCOPE_CLOUD) View.VISIBLE else View.GONE
+        val provider = OpenAiCompatProvider.of(type)
+        binding.cardOpenaiCompat.visibility = if (provider != null) View.VISIBLE else View.GONE
+        if (provider != null) {
+            binding.tvCompatTitle.text = "${type.displayName} 配置"
+            binding.dropdownCompatModel.setSimpleItems(provider.presetModels.toTypedArray())
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -134,12 +149,32 @@ class ApiConfigFragment : Fragment() {
         // DashScope
         binding.btnSaveDashscope.setOnClickListener {
             val apiKey = binding.etDashscopeApiKey.text?.toString() ?: ""
-            viewModel.saveDashScopeKey(apiKey)
+            val model = binding.dropdownDashscopeModel.text?.toString()?.trim() ?: ""
+            viewModel.saveDashScopeKey(apiKey, model)
             Toast.makeText(requireContext(), "DashScope 密钥已保存", Toast.LENGTH_SHORT).show()
         }
         binding.btnClearDashscope.setOnClickListener {
             viewModel.clearDashScopeKey()
             binding.etDashscopeApiKey.text?.clear()
+            binding.dropdownDashscopeModel.setText("", false)
+            Toast.makeText(requireContext(), "已清除", Toast.LENGTH_SHORT).show()
+        }
+
+        // OpenAI 兼容厂家（DeepSeek/Kimi/智谱/硅基流动，共用卡片）
+        binding.btnSaveCompat.setOnClickListener {
+            val type = viewModel.preferredLlmEngine.value
+            if (OpenAiCompatProvider.of(type) == null) return@setOnClickListener
+            val apiKey = binding.etCompatApiKey.text?.toString() ?: ""
+            val model = binding.dropdownCompatModel.text?.toString()?.trim() ?: ""
+            viewModel.saveCompatConfig(type, apiKey, model)
+            Toast.makeText(requireContext(), "${type.displayName} 配置已保存", Toast.LENGTH_SHORT).show()
+        }
+        binding.btnClearCompat.setOnClickListener {
+            val type = viewModel.preferredLlmEngine.value
+            if (OpenAiCompatProvider.of(type) == null) return@setOnClickListener
+            viewModel.clearCompatConfig(type)
+            binding.etCompatApiKey.text?.clear()
+            binding.dropdownCompatModel.setText("", false)
             Toast.makeText(requireContext(), "已清除", Toast.LENGTH_SHORT).show()
         }
 
@@ -208,12 +243,19 @@ class ApiConfigFragment : Fragment() {
             launch { viewModel.arkApiKey.collect { setIfDiffers(binding.etArkApiKey, it) } }
             launch { viewModel.arkEndpointId.collect { setIfDiffers(binding.etArkEndpointId, it) } }
             launch { viewModel.dashScopeApiKey.collect { setIfDiffers(binding.etDashscopeApiKey, it) } }
+            launch { viewModel.dashScopeModel.collect { setIfDiffers(binding.dropdownDashscopeModel, it) } }
+            launch { viewModel.compatApiKey.collect { setIfDiffers(binding.etCompatApiKey, it) } }
+            launch { viewModel.compatModel.collect { setIfDiffers(binding.dropdownCompatModel, it) } }
         }
     }
 
-    /** 值有变化才 setText：避免光标跳动，也不打扰正在输入的用户 */
+    /** 值有变化才 setText：避免光标跳动，也不打扰正在输入的用户。
+     *  AutoCompleteTextView 走 setText(value, false)，防止回填触发过滤弹窗 */
     private fun setIfDiffers(edit: EditText, value: String) {
-        if (edit.text?.toString() != value) edit.setText(value)
+        if (edit.text?.toString() != value) {
+            if (edit is android.widget.AutoCompleteTextView) edit.setText(value, false)
+            else edit.setText(value)
+        }
     }
 
     override fun onDestroyView() {
@@ -280,6 +322,39 @@ class ApiConfigFragment : Fragment() {
 
             ② 注意：RAM AccessKey 不适用于 DashScope，
             必须使用 DashScope 专属 API Key。
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【DeepSeek】
+
+            创建 API Key：
+            https://platform.deepseek.com/api_keys
+            型号留空默认 deepseek-chat（自动指向最新）
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【Kimi】— 月之暗面
+
+            创建 API Key：
+            https://platform.moonshot.cn/console/api-keys
+            型号留空默认 kimi-latest（自动指向最新）
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【智谱 GLM】
+
+            创建 API Key：
+            https://bigmodel.cn/usercenter/proj-mgmt/apikeys
+            型号留空默认 glm-4.7-flash（免费型号）
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【硅基流动】— 聚合平台
+
+            一个 Key 可调用 DeepSeek/Qwen/GLM 等数十个模型。
+            创建 API Key：
+            https://cloud.siliconflow.cn/account/ak
+            型号格式为「厂家/模型名」，如 deepseek-ai/DeepSeek-V3
         """.trimIndent()
 
         AlertDialog.Builder(requireContext())

@@ -114,10 +114,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             AsrEngineType.VOLCENGINE_CLOUD -> prefs.hasVolcengineKeys()
             AsrEngineType.FUNASR_LOCAL -> true
         }
-        (llmHasKey as MutableStateFlow).value = when (prefs.preferredLlmEngine) {
+        (llmHasKey as MutableStateFlow).value = when (val type = prefs.preferredLlmEngine) {
             LlmEngineType.QWEN_LOCAL -> modelDownloadManager.isModelDownloaded()
             LlmEngineType.DOUBAO_CLOUD -> prefs.hasArkKey()
             LlmEngineType.DASHSCOPE_CLOUD -> prefs.hasDashScopeKey()
+            // DeepSeek/Kimi/智谱/硅基流动 等 OpenAI 兼容厂家
+            else -> prefs.hasLlmKey(type)
         }
     }
 

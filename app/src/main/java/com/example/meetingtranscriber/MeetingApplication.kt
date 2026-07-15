@@ -43,7 +43,10 @@ class MeetingApplication : Application() {
             volcengineEngine = VolcengineEngine(prefs),
             qwenEngine = QwenEngine(this),
             doubaoEngine = DoubaoEngine(prefs),
-            dashScopeEngine = DashScopeEngine(prefs)
+            dashScopeEngine = DashScopeEngine(prefs),
+            openAiCompatEngines = OpenAiCompatProvider.entries.associate {
+                it.type to OpenAiCompatEngine(prefs, it)
+            }
         )
     }
 

@@ -52,6 +52,15 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _dashScopeApiKey = MutableStateFlow("")
     val dashScopeApiKey: StateFlow<String> = _dashScopeApiKey
+    private val _dashScopeModel = MutableStateFlow("")
+    val dashScopeModel: StateFlow<String> = _dashScopeModel
+
+    // ── OpenAI 兼容厂家（DeepSeek/Kimi/智谱/硅基流动）共用卡片字段：
+    //    对应"当前选中厂家"的 Key/型号，切换厂家时经 refreshCompatFields 换装 ──
+    private val _compatApiKey = MutableStateFlow("")
+    val compatApiKey: StateFlow<String> = _compatApiKey
+    private val _compatModel = MutableStateFlow("")
+    val compatModel: StateFlow<String> = _compatModel
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -63,6 +72,8 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
             _arkApiKey.value = prefs.arkApiKey
             _arkEndpointId.value = prefs.arkEndpointId
             _dashScopeApiKey.value = prefs.dashScopeApiKey
+            _dashScopeModel.value = prefs.getLlmModel(LlmEngineType.DASHSCOPE_CLOUD)
+            refreshCompatFieldsBlocking(prefs.preferredLlmEngine)
         }
     }
 
@@ -119,11 +130,39 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun saveDashScopeKey(apiKey: String) {
+    fun saveDashScopeKey(apiKey: String, model: String = _dashScopeModel.value) {
         _dashScopeApiKey.value = apiKey
+        _dashScopeModel.value = model
         viewModelScope.launch(Dispatchers.IO) {
             prefs.dashScopeApiKey = apiKey
+            prefs.setLlmModel(LlmEngineType.DASHSCOPE_CLOUD, model)
         }
+    }
+
+    // ── OpenAI 兼容厂家（共用卡片） ──
+
+    /** 切换到 OpenAI 兼容厂家时，把该厂家已存的 Key/型号换装进共用卡片 */
+    fun refreshCompatFields(type: LlmEngineType) {
+        viewModelScope.launch(Dispatchers.IO) { refreshCompatFieldsBlocking(type) }
+    }
+
+    private fun refreshCompatFieldsBlocking(type: LlmEngineType) {
+        if (com.example.meetingtranscriber.engine.llm.OpenAiCompatProvider.of(type) == null) return
+        _compatApiKey.value = prefs.getLlmApiKey(type)
+        _compatModel.value = prefs.getLlmModel(type)
+    }
+
+    fun saveCompatConfig(type: LlmEngineType, apiKey: String, model: String) {
+        _compatApiKey.value = apiKey
+        _compatModel.value = model
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.setLlmApiKey(type, apiKey)
+            prefs.setLlmModel(type, model)
+        }
+    }
+
+    fun clearCompatConfig(type: LlmEngineType) {
+        saveCompatConfig(type, "", "")
     }
 
     fun clearTingwuKeys() {
@@ -139,6 +178,6 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun clearDashScopeKey() {
-        saveDashScopeKey("")
+        saveDashScopeKey("", "")
     }
 }

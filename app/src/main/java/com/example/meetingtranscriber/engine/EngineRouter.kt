@@ -33,7 +33,9 @@ class EngineRouter(
     private var volcengineEngine: AsrEngine? = null,
     private var qwenEngine: LlmEngine? = null,
     private var doubaoEngine: LlmEngine? = null,
-    private var dashScopeEngine: LlmEngine? = null
+    private var dashScopeEngine: LlmEngine? = null,
+    /** OpenAI 兼容云端 LLM（DeepSeek/Kimi/智谱/硅基流动等），按类型索引 */
+    private var openAiCompatEngines: Map<LlmEngineType, LlmEngine> = emptyMap()
 ) {
 
     // ── 公开属性：允许外部延迟注入 ──
@@ -201,6 +203,21 @@ class EngineRouter(
                     qwenEngine!!
                 } else {
                     throw NoEngineException("DashScope Key 未配置，且自动降级已关闭")
+                }
+            }
+
+            // ── OpenAI 兼容云端（DeepSeek/Kimi/智谱/硅基流动） ──
+            openAiCompatEngines.containsKey(preferred) -> {
+                val engine = openAiCompatEngines.getValue(preferred)
+                if (prefs.hasLlmKey(preferred)) {
+                    ensureOrFallback(context, engine, qwenEngine!!, preferred.displayName)
+                } else if (prefs.autoFallback) {
+                    Log.w(TAG, "${preferred.displayName} Key 未配置 → 降级到 Qwen")
+                    if (qwenEngine == null) throw NoEngineException("Qwen 本地引擎未配置，且云端不可用")
+                    ensureInitializedOrThrow(context, qwenEngine!!)
+                    qwenEngine!!
+                } else {
+                    throw NoEngineException("${preferred.displayName} Key 未配置，且自动降级已关闭")
                 }
             }
 

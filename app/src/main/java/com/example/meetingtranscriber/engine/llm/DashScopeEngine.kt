@@ -79,12 +79,13 @@ class DashScopeEngine(
 
             try {
                 val apiKey = prefs.dashScopeApiKey
+                val model = prefs.getLlmModel(LlmEngineType.DASHSCOPE_CLOUD).ifBlank { DEFAULT_MODEL }
                 val prompt = buildPrompt(transcript, style)
 
                 _generationProgress.value = 0.3f
 
                 val body = JSONObject().apply {
-                    put("model", MODEL_NAME)
+                    put("model", model)
                     put("input", JSONObject().apply {
                         put("messages", JSONArray().apply {
                             put(JSONObject().apply {
@@ -177,8 +178,11 @@ class DashScopeEngine(
         private const val TAG = "DashScopeEngine"
 
         private const val API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-        private const val MODEL_NAME = "qwen-turbo"
+        private const val DEFAULT_MODEL = "qwen-turbo"
         private const val MAX_TOKENS = 1000
+
+        /** 型号预置列表（下拉可手动输入其他型号） */
+        val PRESET_MODELS = listOf("qwen-turbo", "qwen-plus", "qwen-max", "qwen-long")
 
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
     }

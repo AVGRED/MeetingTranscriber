@@ -17,18 +17,88 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * 豆包（火山方舟）云端 LLM 引擎。
+ * OpenAI Chat Completions 兼容厂家描述。
  *
- * 通过火山方舟 Chat Completions API 生成会议纪要。
- * 密钥来源: [PreferencesManager] — arkApiKey / arkEndpointId。
- *
- * API: POST https://ark.cn-beijing.volces.com/api/v3/chat/completions
+ * DeepSeek / Kimi / 智谱 / 硅基流动等国产大模型 API 均兼容该协议，
+ * 一个 [OpenAiCompatEngine] 按厂家参数化即可全部覆盖。
+ * 型号 ID 预置列表核实于 2026-07（各厂官方文档），下拉可手动输入新型号。
  */
-class DoubaoEngine(
-    private val prefs: PreferencesManager
+enum class OpenAiCompatProvider(
+    val type: LlmEngineType,
+    val apiUrl: String,
+    val defaultModel: String,
+    val presetModels: List<String>,
+    /** API Key 获取地址（接入说明用） */
+    val keyUrl: String
+) {
+    DEEPSEEK(
+        type = LlmEngineType.DEEPSEEK_CLOUD,
+        apiUrl = "https://api.deepseek.com/chat/completions",
+        defaultModel = "deepseek-chat",
+        presetModels = listOf(
+            "deepseek-chat",        // 始终指向最新对话旗舰
+            "deepseek-reasoner",    // 推理模型
+            "deepseek-v4-pro",
+            "deepseek-v4-flash"
+        ),
+        keyUrl = "https://platform.deepseek.com/api_keys"
+    ),
+    KIMI(
+        type = LlmEngineType.KIMI_CLOUD,
+        apiUrl = "https://api.moonshot.cn/v1/chat/completions",
+        defaultModel = "kimi-latest",
+        presetModels = listOf(
+            "kimi-latest",          // 始终指向最新版本
+            "kimi-k2.6",
+            "kimi-k2.7-code",
+            "kimi-k2-thinking",
+            "moonshot-v1-32k"
+        ),
+        keyUrl = "https://platform.moonshot.cn/console/api-keys"
+    ),
+    ZHIPU(
+        type = LlmEngineType.ZHIPU_CLOUD,
+        apiUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        defaultModel = "glm-4.7-flash",
+        presetModels = listOf(
+            "glm-4.7-flash",        // 免费型号
+            "glm-5-turbo",
+            "glm-5.2",
+            "glm-4.5-air"
+        ),
+        keyUrl = "https://bigmodel.cn/usercenter/proj-mgmt/apikeys"
+    ),
+    SILICONFLOW(
+        type = LlmEngineType.SILICONFLOW_CLOUD,
+        apiUrl = "https://api.siliconflow.cn/v1/chat/completions",
+        defaultModel = "deepseek-ai/DeepSeek-V3",
+        presetModels = listOf(
+            "deepseek-ai/DeepSeek-V3",
+            "deepseek-ai/DeepSeek-R1",
+            "Qwen/Qwen3.5-397B-A17B",
+            "Qwen/Qwen3-235B-A22B-Instruct-2507",
+            "MiniMaxAI/MiniMax-M2.1"
+        ),
+        keyUrl = "https://cloud.siliconflow.cn/account/ak"
+    );
+
+    companion object {
+        fun of(type: LlmEngineType): OpenAiCompatProvider? = entries.find { it.type == type }
+    }
+}
+
+/**
+ * OpenAI Chat Completions 兼容云端 LLM 引擎（按厂家参数化）。
+ *
+ * 密钥/型号来源: [PreferencesManager] — getLlmApiKey / getLlmModel（按引擎类型区分）。
+ * 请求/响应格式与 [DoubaoEngine] 一致（choices[0].message.content）。
+ */
+class OpenAiCompatEngine(
+    private val prefs: PreferencesManager,
+    private val provider: OpenAiCompatProvider
 ) : LlmEngine {
 
-    override val type: LlmEngineType = LlmEngineType.DOUBAO_CLOUD
+    override val type: LlmEngineType = provider.type
 
     private val _generationProgress = MutableStateFlow(0f)
     override val generationProgress: StateFlow<Float> = _generationProgress
@@ -43,23 +113,25 @@ class DoubaoEngine(
 
     @Volatile private var activeCall: Call? = null
 
+    private val label get() = type.displayName
+
     override suspend fun initialize(context: Context): Result<Unit> {
         val current = _engineStatus.value
         if (current.state == EngineState.READY || current.state == EngineState.RUNNING) {
             return Result.success(Unit)
         }
 
-        _engineStatus.value = EngineStatus(EngineState.LOADING, "正在验证豆包 API Key...")
+        _engineStatus.value = EngineStatus(EngineState.LOADING, "正在验证 $label API Key...")
 
-        if (!prefs.hasArkKey()) {
-            val msg = "火山方舟 API Key 未配置"
+        if (!prefs.hasLlmKey(type)) {
+            val msg = "$label API Key 未配置"
             Log.w(TAG, msg)
             _engineStatus.value = EngineStatus(EngineState.ERROR, msg)
             return Result.failure(IllegalStateException(msg))
         }
 
-        _engineStatus.value = EngineStatus(EngineState.READY, "豆包已就绪")
-        Log.i(TAG, "豆包 LLM 引擎初始化成功")
+        _engineStatus.value = EngineStatus(EngineState.READY, "$label 已就绪")
+        Log.i(TAG, "$label LLM 引擎初始化成功")
         return Result.success(Unit)
     }
 
@@ -76,14 +148,14 @@ class DoubaoEngine(
             _generationProgress.value = 0f
 
             try {
-                val apiKey = prefs.arkApiKey
-                val endpointId = prefs.arkEndpointId.ifBlank { DEFAULT_MODEL }
-                val prompt = buildPrompt(transcript, style)
+                val apiKey = prefs.getLlmApiKey(type)
+                val model = prefs.getLlmModel(type).ifBlank { provider.defaultModel }
+                val prompt = PromptBuilder.build(transcript, style)
 
                 _generationProgress.value = 0.3f
 
                 val body = JSONObject().apply {
-                    put("model", endpointId)
+                    put("model", model)
                     put("messages", JSONArray().apply {
                         put(JSONObject().apply {
                             put("role", "system")
@@ -99,7 +171,7 @@ class DoubaoEngine(
                 }
 
                 val request = Request.Builder()
-                    .url(API_URL)
+                    .url(provider.apiUrl)
                     .header("Authorization", "Bearer $apiKey")
                     .header("Content-Type", "application/json")
                     .post(body.toString().toRequestBody(JSON_MEDIA))
@@ -125,27 +197,28 @@ class DoubaoEngine(
                     _engineStatus.value = EngineStatus(EngineState.READY, "纪要已生成")
 
                     if (text != null && text.isNotBlank()) {
-                        Log.i(TAG, "豆包纪要生成成功 (${text.length} 字)")
+                        Log.i(TAG, "$label ($model) 纪要生成成功 (${text.length} 字)")
                         Result.success(text)
                     } else {
-                        Log.w(TAG, "豆包返回空内容")
-                        Result.failure(IOException("豆包返回空内容"))
+                        Log.w(TAG, "$label 返回空内容")
+                        Result.failure(IOException("$label 返回空内容"))
                     }
                 } else {
                     val errorMsg = try {
-                        responseBody?.let { JSONObject(it).optJSONObject("error")?.optString("code") }
+                        responseBody?.let { JSONObject(it).optJSONObject("error")?.optString("message") }
+                            ?.takeIf { it.isNotBlank() }
                     } catch (_: Exception) { null } ?: "HTTP ${response.code}"
 
-                    Log.e(TAG, "豆包 API 错误: $errorMsg")
+                    Log.e(TAG, "$label API 错误: $errorMsg")
                     _engineStatus.value = EngineStatus(EngineState.ERROR, "API 错误: $errorMsg")
                     Result.failure(IOException(errorMsg))
                 }
             } catch (e: IOException) {
-                Log.e(TAG, "豆包网络错误: ${e.message}", e)
+                Log.e(TAG, "$label 网络错误: ${e.message}", e)
                 _engineStatus.value = EngineStatus(EngineState.ERROR, "网络错误: ${e.message}")
                 Result.failure(e)
             } catch (e: Exception) {
-                Log.e(TAG, "豆包异常: ${e.message}", e)
+                Log.e(TAG, "$label 异常: ${e.message}", e)
                 _engineStatus.value = EngineStatus(EngineState.ERROR, "异常: ${e.message}")
                 Result.failure(e)
             } finally {
@@ -165,29 +238,13 @@ class DoubaoEngine(
         _generationProgress.value = 0f
         _engineStatus.value = EngineStatus(EngineState.IDLE)
         activeCall = null
-        Log.i(TAG, "豆包 LLM 引擎已释放")
+        Log.i(TAG, "$label LLM 引擎已释放")
     }
 
-    private fun buildPrompt(transcript: String, style: SummaryStyle): String =
-        PromptBuilder.build(transcript, style)
-
     companion object {
-        private const val TAG = "DoubaoEngine"
-
-        private const val API_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-        private const val DEFAULT_MODEL = "doubao-seed-1-6-250615"
+        private const val TAG = "OpenAiCompatEngine"
         private const val MAX_TOKENS = 1000
-
-        /** 端点/型号预置列表（下拉可手动输入端点 ID 或其他型号） */
-        val PRESET_MODELS = listOf(
-            "doubao-seed-evolving",     // 周级更新，始终最新
-            "doubao-seed-2.1-pro",
-            "doubao-seed-2.1-turbo",
-            "doubao-seed-1-6-250615"
-        )
-
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
-
         private const val SYSTEM_PROMPT = "你是一位专业的会议纪要助手，输出清晰、结构化、可执行。"
     }
 }
