@@ -202,19 +202,28 @@ class AlbumFragment : Fragment() {
     }
 }
 
-/** 相册网格适配器：loadThumbnail 异步加载缩略图（系统自带缓存，无需图片库） */
+/** 相册网格适配器：loadThumbnail 异步加载缩略图 + LruCache 内存缓存
+ *  （回滚不再重新走 MediaStore IPC/解码），ListAdapter+DiffUtil 增量刷新 */
 private class AlbumAdapter(
     private val scope: CoroutineScope,
     private val onClick: (Uri) -> Unit
-) : RecyclerView.Adapter<AlbumAdapter.Holder>() {
+) : androidx.recyclerview.widget.ListAdapter<Uri, AlbumAdapter.Holder>(DIFF) {
 
-    private val items = mutableListOf<Uri>()
+    companion object {
+        private val DIFF = object : androidx.recyclerview.widget.DiffUtil.ItemCallback<Uri>() {
+            override fun areItemsTheSame(oldItem: Uri, newItem: Uri) = oldItem == newItem
+            override fun areContentsTheSame(oldItem: Uri, newItem: Uri) = oldItem == newItem
+        }
 
-    fun submit(list: List<Uri>) {
-        items.clear()
-        items.addAll(list)
-        notifyDataSetChanged()
+        /** 进程级缩略图缓存：上限为最大堆的 1/8（512×512 ARGB ≈1MB/张） */
+        private val thumbCache = object : android.util.LruCache<Uri, android.graphics.Bitmap>(
+            (Runtime.getRuntime().maxMemory() / 8).toInt()
+        ) {
+            override fun sizeOf(key: Uri, value: android.graphics.Bitmap) = value.byteCount
+        }
     }
+
+    fun submit(list: List<Uri>) = submitList(list)
 
     class Holder(val binding: ItemAlbumPhotoBinding) : RecyclerView.ViewHolder(binding.root) {
         var job: Job? = null
@@ -224,21 +233,28 @@ private class AlbumAdapter(
         return Holder(ItemAlbumPhotoBinding.inflate(LayoutInflater.from(parent.context), parent, false))
     }
 
-    override fun getItemCount() = items.size
-
     override fun onBindViewHolder(holder: Holder, position: Int) {
-        val uri = items[position]
+        val uri = getItem(position)
         holder.job?.cancel()
-        holder.binding.ivPhoto.setImageDrawable(null)
         holder.binding.ivPhoto.tag = uri
-        holder.job = scope.launch {
-            val resolver = holder.binding.root.context.applicationContext.contentResolver
-            val bmp = withContext(Dispatchers.IO) {
-                runCatching { resolver.loadThumbnail(uri, Size(512, 512), null) }.getOrNull()
-            }
-            // 复用校验：加载期间该格子可能已绑定到其他照片
-            if (bmp != null && holder.binding.ivPhoto.tag == uri) {
-                holder.binding.ivPhoto.setImageBitmap(bmp)
+
+        val cached = thumbCache.get(uri)
+        if (cached != null) {
+            holder.binding.ivPhoto.setImageBitmap(cached)
+        } else {
+            holder.binding.ivPhoto.setImageDrawable(null)
+            holder.job = scope.launch {
+                val resolver = holder.binding.root.context.applicationContext.contentResolver
+                val bmp = withContext(Dispatchers.IO) {
+                    runCatching { resolver.loadThumbnail(uri, Size(512, 512), null) }.getOrNull()
+                }
+                if (bmp != null) {
+                    thumbCache.put(uri, bmp)
+                    // 复用校验：加载期间该格子可能已绑定到其他照片
+                    if (holder.binding.ivPhoto.tag == uri) {
+                        holder.binding.ivPhoto.setImageBitmap(bmp)
+                    }
+                }
             }
         }
         holder.binding.root.setOnClickListener { onClick(uri) }
