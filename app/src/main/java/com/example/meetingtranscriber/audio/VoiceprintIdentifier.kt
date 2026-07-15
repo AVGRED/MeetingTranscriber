@@ -132,44 +132,17 @@ class VoiceprintIdentifier(private val scope: CoroutineScope) {
                     scoreLog.append("$name=%.3f ".format(score))
                     if (score > bestScore) { bestScore = score; bestName = name }
                 }
-
-                // 滞回判定：短轮次声纹噪声大（500ms 停顿即切轮，大量 1-6s 轮次，
-                // 同一人分数会大幅波动），"低于匹配阈值就注册新人"会把老熟人拆成
-                // 多人。注册新身份必须同时满足：与所有已知说话人都明显不像
-                // (<THRESHOLD_NEW) 且本轮人声足够长 (≥MIN_REGISTER_MS)
-                val turnMs = pcm.size / BYTES_PER_MS
-                val label: String?
-                val decision: String
-                when {
-                    bestName != null && bestScore >= THRESHOLD -> {
-                        label = bestName
-                        decision = "匹配"
-                        // 高置信才累积样本：边缘分数(刚过阈值)可能是错配，
-                        // 混入错的人会持续污染后续判定
-                        if (bestScore >= THRESHOLD_SAMPLE_ADD) {
-                            speakers[label]!!.let { if (it.size < MAX_SAMPLES) it.add(emb) }
-                        }
-                    }
-                    turnMs < MIN_REGISTER_MS -> {
-                        // 短轮次匹配不上：不注册也不硬判，交由调用方就近归属
-                        label = null
-                        decision = "短轮次不注册"
-                    }
-                    bestName != null && bestScore >= THRESHOLD_NEW -> {
-                        // 灰区 [THRESHOLD_NEW, THRESHOLD)：像但不够像——判给最高分
-                        // 的已知说话人，但不累积样本
-                        label = bestName
-                        decision = "灰区就高"
-                    }
-                    else -> {
-                        label = "会议人${speakers.size + 1}"
-                        speakers[label] = mutableListOf(emb)
-                        decision = "注册新人"
-                    }
+                val label: String
+                if (bestName != null && bestScore >= THRESHOLD) {
+                    label = bestName
+                    // 多样本累积：命中后追加新声纹，样本越多越稳（上限 MAX_SAMPLES）
+                    speakers[label]!!.let { if (it.size < MAX_SAMPLES) it.add(emb) }
+                } else {
+                    label = "会议人${speakers.size + 1}"
+                    speakers[label] = mutableListOf(emb)
                 }
-                // Log.i：release 剥离了 v/d，保留本行便于真机调参（每轮仅一条）
-                Log.i(TAG, "$turnSpeakerId (${turnMs}ms, embedding ${embeddingCost}ms) → $label [$decision] " +
-                        "[${scoreLog.toString().trim().ifEmpty { "首个说话人" }}, 阈值=$THRESHOLD_NEW/$THRESHOLD]")
+                Log.d(TAG, "$turnSpeakerId (${pcm.size / BYTES_PER_MS}ms, embedding ${embeddingCost}ms) → $label " +
+                        "[${scoreLog.toString().trim().ifEmpty { "首个说话人" }}, 阈值=$THRESHOLD]")
                 onIdentified?.invoke(turnSpeakerId, label)
             } catch (e: Exception) {
                 Log.e(TAG, "声纹识别异常: ${e.message}")
@@ -233,16 +206,8 @@ class VoiceprintIdentifier(private val scope: CoroutineScope) {
         /** 6 秒上限：feed 只留轮次开头纯人声，CAM++ 在 3-6s 精度已接近饱和，
          *  比 15s 省 ~60% 计算量（低端机实测同人被拆多人再回调至 8s） */
         private const val MAX_TURN_BYTES = SAMPLE_RATE * 2 * 6
-        /** 匹配阈值：≥此值判定为同一人（分数见判定日志，可据此微调） */
+        /** 余弦相似度阈值：≥此值判定为同一人（分数见判定日志，可据此微调） */
         private const val THRESHOLD = 0.45f
-        /** 注册新人阈值：低于此值才视为"明显是另一个声音"。[THRESHOLD_NEW,
-         *  THRESHOLD) 灰区判给最高分的已知说话人——短轮次分数波动大，
-         *  单阈值一票注册是"老熟人被当新人"的元凶 */
-        private const val THRESHOLD_NEW = 0.32f
-        /** 样本累积阈值：≥此值的高置信命中才把声纹加入样本组，防错配污染 */
-        private const val THRESHOLD_SAMPLE_ADD = 0.55f
-        /** 注册新说话人所需的最少人声时长：短轮次声纹不可靠，禁止其创建新身份 */
-        private const val MIN_REGISTER_MS = 3000
         /** 每个说话人最多累积的声纹样本数 */
         private const val MAX_SAMPLES = 5
     }
