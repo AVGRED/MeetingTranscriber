@@ -37,40 +37,61 @@ object CryptoManager {
     private const val DEK_IV_KEY = "encrypted_dek_iv"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
-    private var initialized = false
-    private var enabled = true
-    private var dek: SecretKey? = null
+    private val initLock = Any()
+    private val initLatch = java.util.concurrent.CountDownLatch(1)
+    @Volatile private var initialized = false
+    @Volatile private var enabled = true
+    @Volatile private var dek: SecretKey? = null
 
     fun init(context: Context) {
-        if (initialized) return
-        enabled = !BuildConfig.DEBUG // 可在开发时强制关闭
-        if (!enabled) {
-            Log.i(TAG, "Debug 模式，加密已关闭")
-            initialized = true
-            return
-        }
-        try {
-            ensureMasterKey()
-            dek = loadOrGenerateDEK(context)
-            initialized = true
-            Log.i(TAG, "加密初始化完成")
-        } catch (e: Exception) {
-            Log.e(TAG, "加密初始化失败，降级为明文模式: ${e.message}", e)
-            enabled = false
-            initialized = true
+        synchronized(initLock) {
+            if (initialized) return
+            enabled = !BuildConfig.DEBUG // 可在开发时强制关闭
+            if (!enabled) {
+                Log.i(TAG, "Debug 模式，加密已关闭")
+                initialized = true
+                initLatch.countDown()
+                return
+            }
+            try {
+                ensureMasterKey()
+                dek = loadOrGenerateDEK(context)
+                initialized = true
+                Log.i(TAG, "加密初始化完成")
+            } catch (e: Exception) {
+                Log.e(TAG, "加密初始化失败，降级为明文模式: ${e.message}", e)
+                enabled = false
+                initialized = true
+            } finally {
+                initLatch.countDown()
+            }
         }
     }
 
-    fun isEncryptionEnabled(): Boolean = enabled
+    /**
+     * 就绪门：init 已移到后台线程，所有密钥消费方先在此等待，
+     * 防止 init 未完成时 dek==null 被误判为"明文模式"。
+     */
+    private fun awaitInitialized() {
+        if (initialized) return
+        initLatch.await()
+    }
+
+    fun isEncryptionEnabled(): Boolean {
+        awaitInitialized()
+        return enabled
+    }
 
     /** SQLCipher 密码（hex 编码的 DEK） */
     fun getDatabasePassphrase(): ByteArray {
+        awaitInitialized()
         if (!enabled || dek == null) return ByteArray(0)
         return dek!!.encoded.joinToString("") { "%02x".format(it) }.toByteArray()
     }
 
     /** 文件加密密钥（直接使用 DEK） */
     fun getFileSecretKey(): SecretKey? {
+        awaitInitialized()
         if (!enabled || dek == null) return null
         return dek
     }

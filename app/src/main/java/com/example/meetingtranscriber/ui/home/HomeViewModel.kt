@@ -19,32 +19,21 @@ import kotlinx.coroutines.launch
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = PreferencesManager(application)
-    private val db = AppDatabase.getInstance(application)
-    private val repo = MeetingRepository(db)
+    // DB 懒加载：getInstance 首调可能触发 SQLCipher 打开/明文迁移，不能在主线程构造函数付出
+    private val db by lazy { AppDatabase.getInstance(application) }
+    private val repo by lazy { MeetingRepository(db) }
     private val modelDownloadManager = ModelDownloadManager(application)
 
     // ── 引擎状态 ──
 
     val asrEngineName: StateFlow<String> = MutableStateFlow(prefs.preferredAsrEngine.displayName)
 
-    val asrHasKey: StateFlow<Boolean> = MutableStateFlow(
-        when (prefs.preferredAsrEngine) {
-            AsrEngineType.FUNASR_CLOUD -> prefs.hasFunAsrCloudUrl()
-            AsrEngineType.TINGWU_CLOUD -> prefs.hasTingwuKeys()
-            AsrEngineType.VOLCENGINE_CLOUD -> prefs.hasVolcengineKeys()
-            AsrEngineType.FUNASR_LOCAL -> true
-        }
-    )
+    // 初值中性 true，由 init 的 IO 协程回填（securePrefs/文件 stat 不进主线程构造函数）
+    val asrHasKey: StateFlow<Boolean> = MutableStateFlow(true)
 
     val llmEngineName: StateFlow<String> = MutableStateFlow(prefs.preferredLlmEngine.displayName)
 
-    val llmHasKey: StateFlow<Boolean> = MutableStateFlow(
-        when (prefs.preferredLlmEngine) {
-            LlmEngineType.QWEN_LOCAL -> modelDownloadManager.isModelDownloaded()
-            LlmEngineType.DOUBAO_CLOUD -> prefs.hasArkKey()
-            LlmEngineType.DASHSCOPE_CLOUD -> prefs.hasDashScopeKey()
-        }
-    )
+    val llmHasKey: StateFlow<Boolean> = MutableStateFlow(true)
 
     // ── 网络状态 ──
 
@@ -110,15 +99,34 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
 
     init {
-        loadStats()
-        loadRecentMeetings()
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            refreshEngineBadges()
+        }
+        loadHomeData()
         observeNetwork()
     }
 
-    private fun loadStats() {
+    /** 引擎角标回填（须在 IO 线程：触碰 securePrefs + 模型文件 stat） */
+    private fun refreshEngineBadges() {
+        (asrHasKey as MutableStateFlow).value = when (prefs.preferredAsrEngine) {
+            AsrEngineType.FUNASR_CLOUD -> prefs.hasFunAsrCloudUrl()
+            AsrEngineType.TINGWU_CLOUD -> prefs.hasTingwuKeys()
+            AsrEngineType.VOLCENGINE_CLOUD -> prefs.hasVolcengineKeys()
+            AsrEngineType.FUNASR_LOCAL -> true
+        }
+        (llmHasKey as MutableStateFlow).value = when (prefs.preferredLlmEngine) {
+            LlmEngineType.QWEN_LOCAL -> modelDownloadManager.isModelDownloaded()
+            LlmEngineType.DOUBAO_CLOUD -> prefs.hasArkKey()
+            LlmEngineType.DASHSCOPE_CLOUD -> prefs.hasDashScopeKey()
+        }
+    }
+
+    /** 统计 + 最近会议合并为一次全表查询（原先 loadStats/loadRecentMeetings 各查一遍） */
+    private fun loadHomeData() {
         viewModelScope.launch {
             val meetings = repo.getAllMeetingsOnce()
             _meetingCount.value = meetings.size
+            _recentMeetings.value = meetings.filter { !it.isArchived }.take(3)
             // 条录音 = 录音文件仍存在的会议数（30 天清理后不再计入，与实际可播放的录音对齐）
             val withRecording = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 meetings.filter { m ->
@@ -144,13 +152,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun loadRecentMeetings() {
-        viewModelScope.launch {
-            val meetings = repo.getAllMeetingsOnce()
-            _recentMeetings.value = meetings.filter { !it.isArchived }.take(3)
-        }
-    }
-
     private fun observeNetwork() {
         viewModelScope.launch {
             NetworkMonitor.networkState.collect { available ->
@@ -170,9 +171,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 刷新统计数据（onResume 时调用） */
     fun refresh() {
-        loadStats()
-        loadRecentMeetings()
+        loadHomeData()
         (asrEngineName as MutableStateFlow).value = prefs.preferredAsrEngine.displayName
         (llmEngineName as MutableStateFlow).value = prefs.preferredLlmEngine.displayName
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            refreshEngineBadges()
+        }
     }
 }

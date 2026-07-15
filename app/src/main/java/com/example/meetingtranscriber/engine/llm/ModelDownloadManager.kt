@@ -64,13 +64,9 @@ class ModelDownloadManager(private val context: Context) {
 
     private var downloadJob: Job? = null
 
-    /** 目标模型文件 */
+    /** 目标模型文件（纯路径计算，getter 会在主线程被触碰，不做磁盘写） */
     val modelFile: File
-        get() {
-            val dir = File(context.filesDir, QwenEngine.MODEL_DIR)
-            dir.mkdirs()
-            return File(dir, QwenEngine.MODEL_FILE_NAME)
-        }
+        get() = File(File(context.filesDir, QwenEngine.MODEL_DIR), QwenEngine.MODEL_FILE_NAME)
 
     /** 临时下载文件（断点续传用） */
     private val tempFile: File
@@ -98,6 +94,7 @@ class ModelDownloadManager(private val context: Context) {
         // 捕获协程 Job 以支持 cancel()
         downloadJob = coroutineContext[Job]
         return withContext(Dispatchers.IO) {
+            modelFile.parentFile?.mkdirs() // 目录创建移到下载路径（原在 getter 副作用里）
             if (isModelDownloaded()) {
                 Log.i(TAG, "模型已存在，跳过下载: ${modelFile.absolutePath}")
                 _downloadProgress.value = DownloadState(

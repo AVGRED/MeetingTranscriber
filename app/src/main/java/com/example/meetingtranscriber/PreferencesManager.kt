@@ -20,23 +20,14 @@ class PreferencesManager(context: Context) {
 
     private val appContext = context.applicationContext
 
-    // ─── 加密存储（API Key） ───
-    private val securePrefs: SharedPreferences by lazy {
-        try {
-            val masterKey = MasterKey.Builder(appContext)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                appContext,
-                SECURE_PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "EncryptedSharedPrefs 不可用，回退到明文: ${e.message}")
-            appContext.getSharedPreferences(SECURE_PREFS_NAME, Context.MODE_PRIVATE)
-        }
+    // ─── 加密存储（API Key，进程级单例：EncryptedSharedPrefs 创建含 Keystore 操作，
+    //     成本数百 ms，PreferencesManager 多处实例化，不能每实例重复付） ───
+    private val securePrefs: SharedPreferences
+        get() = obtainSecurePrefs(appContext)
+
+    /** 后台预热加密存储，避免主线程首触付出 Keystore 成本 */
+    fun warmUp() {
+        obtainSecurePrefs(appContext)
     }
 
     // ─── 明文偏好 ───
@@ -162,6 +153,32 @@ class PreferencesManager(context: Context) {
 
     companion object {
         private const val TAG = "PreferencesManager"
+
+        @Volatile private var sharedSecurePrefs: SharedPreferences? = null
+
+        private fun obtainSecurePrefs(appContext: Context): SharedPreferences {
+            sharedSecurePrefs?.let { return it }
+            synchronized(this) {
+                sharedSecurePrefs?.let { return it }
+                val prefs = try {
+                    val masterKey = MasterKey.Builder(appContext)
+                        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                        .build()
+                    EncryptedSharedPreferences.create(
+                        appContext,
+                        SECURE_PREFS_NAME,
+                        masterKey,
+                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "EncryptedSharedPrefs 不可用，回退到明文: ${e.message}")
+                    appContext.getSharedPreferences(SECURE_PREFS_NAME, Context.MODE_PRIVATE)
+                }
+                sharedSecurePrefs = prefs
+                return prefs
+            }
+        }
 
         private const val SECURE_PREFS_NAME = "meeting_secure_keys"
         const val PLAIN_PREFS_NAME = "meeting_preferences"

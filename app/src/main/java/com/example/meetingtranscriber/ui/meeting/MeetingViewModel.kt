@@ -32,9 +32,10 @@ import java.io.File
 
 class MeetingViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = AppDatabase.getInstance(application)
-    private val meetingRepository = MeetingRepository(db)
-    private val transcriptRepository = TranscriptRepository(db)
+    // DB 懒加载：getInstance 首调可能触发 SQLCipher 打开/迁移，不进主线程构造函数
+    private val db by lazy { AppDatabase.getInstance(application) }
+    private val meetingRepository by lazy { MeetingRepository(db) }
+    private val transcriptRepository by lazy { TranscriptRepository(db) }
 
     // ── 引擎路由 + UseCase（用于抽象 ASR/LLM 访问，而非直接调用 AsrProvider） ──
     private val engineRouter: EngineRouter by lazy {
@@ -45,8 +46,13 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
     val audioCaptureManager = AudioCaptureManager()
     private val vadDetector = VADDetector()  // 能量 VAD（Silero 不可用时的回退）
-    /** Silero 神经网络 VAD：能量 VAD 会被 AGC 底噪骗过导致永不切轮（红米实测） */
-    private val sileroVad: SileroVadDetector? = SileroVadDetector.create(application)
+    /** Silero 神经网络 VAD：能量 VAD 会被 AGC 底噪骗过导致永不切轮（红米实测）。
+     *  ONNX 会话构建移到 IO 线程（原在主线程构造函数里，是切到会议 Tab 白屏元凶之一）；
+     *  加载完成前采集链路经 ?: 回退能量 VAD，startMeeting 会先 join 确保就绪 */
+    @Volatile private var sileroVad: SileroVadDetector? = null
+    private val sileroVadReady: Job = viewModelScope.launch(Dispatchers.IO) {
+        sileroVad = SileroVadDetector.create(application)
+    }
     private val voiceprint = VoiceprintIdentifier(viewModelScope)
     /** 本次会议是否启用声纹识别（本地 FunASR 引擎 + 模型加载成功） */
     @Volatile private var voiceprintEnabled = false
@@ -63,7 +69,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     private var meetingStartTime = 0L
     private var elapsedJob: Job? = null
     private var currentMeetingTitle: String = ""
-    private val recoveryStateDao = db.recoveryStateDao()
+    private val recoveryStateDao by lazy { db.recoveryStateDao() }
     private var recoveryJob: Job? = null
     private val pendingSegmentsForRecovery = mutableListOf<TranscriptSegment>()
     /** 复用实例：Gson() 构造含反射 TypeAdapter 构建，每 5s 新建是无谓开销 */
@@ -223,7 +229,10 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             currentMeetingId = meetingRepository.createMeeting(title, tag)
             meetingStartTime = System.currentTimeMillis()
 
-            val started = audioCaptureManager.start()
+            // Silero VAD 后台加载兜底：确保开会时神经 VAD 已就绪（通常早已完成，join 为零成本）
+            sileroVadReady.join()
+            // AudioRecord 构建 + startRecording 含系统服务 IPC，移出主线程
+            val started = withContext(Dispatchers.IO) { audioCaptureManager.start() }
             if (!started) {
                 _uiState.update { it.copy(errorMessage = "启动音频采集失败") }
                 return@launch

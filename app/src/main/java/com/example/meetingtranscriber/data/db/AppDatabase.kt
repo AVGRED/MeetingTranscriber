@@ -40,6 +40,9 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
         @Volatile private var migrationAttempted = false
+        /** 迁移专用锁：不能复用 companion 的 synchronized(this)，
+         *  migratePlaintextIfNeeded 内有 runBlocking+DAO，复用同一把锁会死锁 */
+        private val migrationLock = Any()
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -144,12 +147,13 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): AppDatabase {
             INSTANCE?.let { return it }
-            // 迁移必须在 synchronized 块外执行，因为 migratePlaintextIfNeeded 使用 runBlocking
-            // 如果在 synchronized 内调用 runBlocking，DAO 操作可能触发同一把锁 → 死锁
-            // migrationAttempted 标志防止多线程重复执行
-            if (!migrationAttempted && CryptoManager.isEncryptionEnabled()) {
-                migratePlaintextIfNeeded(context, context.getDatabasePath(DB_NAME))
-                migrationAttempted = true
+            // 迁移用独立锁：Application 后台线程与 ViewModel 主线程可能并发首次调用，
+            // 原先"检查标志→迁移→置位"无锁，两线程可同时进入 → 迁移跑两遍/跑在主线程
+            synchronized(migrationLock) {
+                if (!migrationAttempted && CryptoManager.isEncryptionEnabled()) {
+                    migratePlaintextIfNeeded(context, context.getDatabasePath(DB_NAME))
+                    migrationAttempted = true
+                }
             }
             return synchronized(this) {
                 INSTANCE ?: buildDatabase(context).also { INSTANCE = it }

@@ -2,11 +2,14 @@ package com.example.meetingtranscriber.ui.apiconfig
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.meetingtranscriber.PreferencesManager
 import com.example.meetingtranscriber.engine.AsrEngineType
 import com.example.meetingtranscriber.engine.LlmEngineType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 class ApiConfigViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -28,29 +31,40 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
     private val _funasrCloudUrl = MutableStateFlow(prefs.funasrCloudUrl)
     val funasrCloudUrl: StateFlow<String> = _funasrCloudUrl
 
-    // ── 通义听悟密钥 ──
-    private val _tingwuAkId = MutableStateFlow(prefs.tingwuAccessKeyId)
+    // ── 密钥（加密存储，读取含 Keystore/AES 解密：初值空串，IO 协程回填，
+    //     不能在主线程构造函数里同步解密 8 个值） ──
+    private val _tingwuAkId = MutableStateFlow("")
     val tingwuAkId: StateFlow<String> = _tingwuAkId
-    private val _tingwuAkSecret = MutableStateFlow(prefs.tingwuAccessKeySecret)
+    private val _tingwuAkSecret = MutableStateFlow("")
     val tingwuAkSecret: StateFlow<String> = _tingwuAkSecret
-    private val _tingwuAppKey = MutableStateFlow(prefs.tingwuAppKey)
+    private val _tingwuAppKey = MutableStateFlow("")
     val tingwuAppKey: StateFlow<String> = _tingwuAppKey
 
-    // ── 豆包 ASR 密钥 ──
-    private val _volcAsrApiKey = MutableStateFlow(prefs.volcengineAsrApiKey)
+    private val _volcAsrApiKey = MutableStateFlow("")
     val volcAsrApiKey: StateFlow<String> = _volcAsrApiKey
-    private val _volcAsrToken = MutableStateFlow(prefs.volcengineAsrAccessToken)
+    private val _volcAsrToken = MutableStateFlow("")
     val volcAsrToken: StateFlow<String> = _volcAsrToken
 
-    // ── 豆包 LLM 密钥 ──
-    private val _arkApiKey = MutableStateFlow(prefs.arkApiKey)
+    private val _arkApiKey = MutableStateFlow("")
     val arkApiKey: StateFlow<String> = _arkApiKey
-    private val _arkEndpointId = MutableStateFlow(prefs.arkEndpointId)
+    private val _arkEndpointId = MutableStateFlow("")
     val arkEndpointId: StateFlow<String> = _arkEndpointId
 
-    // ── DashScope 密钥 ──
-    private val _dashScopeApiKey = MutableStateFlow(prefs.dashScopeApiKey)
+    private val _dashScopeApiKey = MutableStateFlow("")
     val dashScopeApiKey: StateFlow<String> = _dashScopeApiKey
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            _tingwuAkId.value = prefs.tingwuAccessKeyId
+            _tingwuAkSecret.value = prefs.tingwuAccessKeySecret
+            _tingwuAppKey.value = prefs.tingwuAppKey
+            _volcAsrApiKey.value = prefs.volcengineAsrApiKey
+            _volcAsrToken.value = prefs.volcengineAsrAccessToken
+            _arkApiKey.value = prefs.arkApiKey
+            _arkEndpointId.value = prefs.arkEndpointId
+            _dashScopeApiKey.value = prefs.dashScopeApiKey
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════
     // Mutators
@@ -77,31 +91,39 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun saveTingwuKeys(akId: String, akSecret: String, appKey: String) {
-        prefs.tingwuAccessKeyId = akId
-        prefs.tingwuAccessKeySecret = akSecret
-        prefs.tingwuAppKey = appKey
         _tingwuAkId.value = akId
         _tingwuAkSecret.value = akSecret
         _tingwuAppKey.value = appKey
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.tingwuAccessKeyId = akId
+            prefs.tingwuAccessKeySecret = akSecret
+            prefs.tingwuAppKey = appKey
+        }
     }
 
     fun saveVolcengineKeys(apiKey: String, accessToken: String) {
-        prefs.volcengineAsrApiKey = apiKey
-        prefs.volcengineAsrAccessToken = accessToken
         _volcAsrApiKey.value = apiKey
         _volcAsrToken.value = accessToken
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.volcengineAsrApiKey = apiKey
+            prefs.volcengineAsrAccessToken = accessToken
+        }
     }
 
     fun saveArkKey(apiKey: String, endpointId: String) {
-        prefs.arkApiKey = apiKey
-        prefs.arkEndpointId = endpointId
         _arkApiKey.value = apiKey
         _arkEndpointId.value = endpointId
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.arkApiKey = apiKey
+            prefs.arkEndpointId = endpointId
+        }
     }
 
     fun saveDashScopeKey(apiKey: String) {
-        prefs.dashScopeApiKey = apiKey
         _dashScopeApiKey.value = apiKey
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.dashScopeApiKey = apiKey
+        }
     }
 
     fun clearTingwuKeys() {

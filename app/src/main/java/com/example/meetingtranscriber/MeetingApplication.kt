@@ -50,15 +50,18 @@ class MeetingApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        CryptoManager.init(this)
         createNotificationChannels()
 
-        // 启动重活全部移出主线程：SQLCipher 打开/迁移 + 文件清理是低端机冷启动白屏元凶
+        // 启动重活全部移出主线程：Keystore/EncryptedPrefs 初始化 + SQLCipher 打开/迁移
+        // + 文件清理是低端机冷启动白屏元凶（消费方经 CryptoManager.awaitInitialized 就绪门等待）
         CoroutineScope(Dispatchers.IO).launch {
+            CryptoManager.init(this@MeetingApplication)
+            val prefs = PreferencesManager(this@MeetingApplication)
+            prefs.warmUp() // 预热 EncryptedSharedPreferences，避免主线程首触付出 Keystore 成本
             checkRecoveryState()
             recoveryCheckDone.complete(Unit)
             // 默认本地引擎时预加载 ASR 模型（226MB 需 3-4s）：首次开会免等
-            if (PreferencesManager(this@MeetingApplication).preferredAsrEngine ==
+            if (prefs.preferredAsrEngine ==
                 com.example.meetingtranscriber.engine.AsrEngineType.FUNASR_LOCAL) {
                 funAsrLocal.initialize(this@MeetingApplication)
             }
