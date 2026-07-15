@@ -34,3 +34,10 @@
 
 # llama.cpp C++ standard library (bundled .so)
 -keep class com.example.meetingtranscriber.engine.llm.* { *; }
+
+# 剥离 release 热路径调试日志（interim decode 每 250ms、VAD 状态翻转、逐句累计
+# 等 Log.d 在 release 存活是无谓开销）。只剥 v/d，保留 i/w/e 供现场诊断
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+}
