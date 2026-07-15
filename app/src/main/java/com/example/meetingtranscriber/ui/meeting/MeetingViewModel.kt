@@ -75,9 +75,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     /** 复用实例：Gson() 构造含反射 TypeAdapter 构建，每 5s 新建是无谓开销 */
     private val gson = Gson()
 
-    /** 已处理的 ASR 句子数（避免重复 append） */
-    private var processedSentenceCount = 0
-
     /** 最近一条落地句子的引擎 sentenceId。合并后的段落保留首段 sentenceId，
      *  三段以上超长句的连续性判断必须用它而不是 last.sentenceId */
     private var lastAppendedSentenceId = -1L
@@ -140,16 +137,9 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         }
 
         viewModelScope.launch {
-            transcriptionUseCase.sentences.collect { allSentences ->
-                // 只处理新句子（增量追加）
-                if (allSentences.size > processedSentenceCount) {
-                    for (i in processedSentenceCount until allSentences.size) {
-                        val s = allSentences[i]
-                        appendSegment(s.speakerId, s.text, s.startTimeMs, s.endTimeMs,
-                            s.sentenceId, s.isContinuation)
-                    }
-                    processedSentenceCount = allSentences.size
-                }
+            transcriptionUseCase.sentenceFlow.collect { s ->
+                appendSegment(s.speakerId, s.text, s.startTimeMs, s.endTimeMs,
+                    s.sentenceId, s.isContinuation)
             }
         }
 
@@ -254,7 +244,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             try {
                 // 清空上次会议的残留数据
                 _segments.value = emptyList()
-                processedSentenceCount = 0
                 lastAppendedSentenceId = -1L
                 speakerLabelMap.clear()
                 lastIdentifiedLabel = null
@@ -375,7 +364,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             _uiState.update { it.copy(errorMessage = msg) }
             return false
         }
-        processedSentenceCount = 0
         speakerGapFrames = 0
         vadDetector.reset()
         sileroVad?.reset()
@@ -427,7 +415,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
             // 清空转写列表，避免二次进入时残留旧数据
             _segments.value = emptyList()
-            processedSentenceCount = 0
             speakerLabelMap.clear()
 
             if (meeting != null) {
@@ -534,15 +521,24 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         _segments.update { it + segment }
         lastAppendedSentenceId = sentenceId
         pendingSegmentsForRecovery.add(segment)
-        _uiState.update { it.copy(
-            interimText = "",
-            speakerLabels = speakerLabelMap.toMap(),
-            speakerCount = speakerLabelMap.values.toSet().size
-        ) }
+        // speakerLabelMap 每轮次一个 key，长会议达数百条——只有本句实际新增轮次
+        // 时才做 toMap/toSet 全量拷贝（声纹模式的标签由 onSpeakerIdentified 更新）
+        if (!voiceprintEnabled && !uiStateHasSpeaker(speakerId)) {
+            _uiState.update { it.copy(
+                interimText = "",
+                speakerLabels = speakerLabelMap.toMap(),
+                speakerCount = speakerLabelMap.values.toSet().size
+            ) }
+        } else {
+            _uiState.update { it.copy(interimText = "") }
+        }
         viewModelScope.launch {
             transcriptRepository.saveSegment(segment)
         }
     }
+
+    private fun uiStateHasSpeaker(speakerId: String): Boolean =
+        _uiState.value.speakerLabels.containsKey(speakerId)
 
     private fun generateSummary(meeting: MeetingInfo) {
         viewModelScope.launch {

@@ -39,18 +39,13 @@ class TranscriptionUseCase(
     private val _interimText = MutableStateFlow("")
     val interimText: StateFlow<String> = _interimText
 
-    /** 完整句子（实时追加） */
-    private val _sentences = MutableStateFlow<List<AsrSentence>>(emptyList())
-    val sentences: StateFlow<List<AsrSentence>> = _sentences
+    /** 逐句转发引擎定稿句（替代原 StateFlow<List> 全列表快照：每句 list+sentence
+     *  全量拷贝，2h 会议 1000+ 句时每句 O(n)，是长会议主线程卡顿源之一） */
+    private val _sentenceFlow = MutableSharedFlow<AsrSentence>(extraBufferCapacity = 256)
+    val sentenceFlow: SharedFlow<AsrSentence> = _sentenceFlow
 
-    /** 完整转写文本（所有句子拼接） */
-    val fullTranscript: StateFlow<String> = _sentences.map { list ->
-        list.joinToString("\n") { it.text }
-    }.stateIn(
-        scope = CoroutineScope(Dispatchers.Main),
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = ""
-    )
+    /** 累积句子（仅 stop() 返回用；追加 O(1)，不再每句复制整表） */
+    private val sentenceList = ArrayList<AsrSentence>()
 
     /** 是否正在转写 */
     private val _isRunning = MutableStateFlow(false)
@@ -117,7 +112,7 @@ class TranscriptionUseCase(
             }
 
             // 4. 开始收集句子 + interim
-            _sentences.value = emptyList()
+            synchronized(sentenceList) { sentenceList.clear() }
             _interimText.value = ""
             _isRunning.value = true
 
@@ -130,9 +125,12 @@ class TranscriptionUseCase(
                 }
                 launch {
                     engine!!.sentenceResults.collect { sentence ->
-                        val updated = _sentences.value + sentence
-                        _sentences.value = updated
-                        Log.d(TAG, "累计 ${updated.size} 句")
+                        val count = synchronized(sentenceList) {
+                            sentenceList.add(sentence)
+                            sentenceList.size
+                        }
+                        _sentenceFlow.emit(sentence)
+                        Log.d(TAG, "累计 $count 句")
                     }
                 }
                 launch {
@@ -190,7 +188,7 @@ class TranscriptionUseCase(
         sentenceCollectorJob?.cancel()
         sentenceCollectorJob = null
 
-        val result = _sentences.value.toList()
+        val result = synchronized(sentenceList) { sentenceList.toList() }
         Log.i(TAG, "转写结束，共 ${result.size} 句")
 
         // 释放引擎
@@ -244,7 +242,7 @@ class TranscriptionUseCase(
         } catch (_: Exception) {}
 
         engine = null
-        _sentences.value = emptyList()
+        synchronized(sentenceList) { sentenceList.clear() }
         _interimText.value = ""
         _engineStatus.value = EngineStatus(EngineState.IDLE)
         _currentEngine.value = null
