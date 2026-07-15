@@ -69,7 +69,11 @@ enum class AsrEngineType(
     FUNASR_CLOUD("FunASR 云端", isCloud = true),
     FUNASR_LOCAL("FunASR", isCloud = false),
     TINGWU_CLOUD("通义听悟", isCloud = true),
-    VOLCENGINE_CLOUD("豆包 ASR", isCloud = true, dialectSupport = listOf("普通话"))
+    VOLCENGINE_CLOUD("豆包 ASR", isCloud = true, dialectSupport = listOf("普通话")),
+    PARAFORMER_CLOUD("阿里 Paraformer", isCloud = true, dialectSupport = listOf("普通话", "粤语")),
+    XFYUN_CLOUD("讯飞实时转写", isCloud = true, dialectSupport = listOf("普通话")),
+    TENCENT_CLOUD("腾讯云识别", isCloud = true, dialectSupport = listOf("普通话")),
+    BAIDU_CLOUD("百度识别", isCloud = true, dialectSupport = listOf("普通话"))
 }
 
 // ═══════════════════════════════════════════════════════════════

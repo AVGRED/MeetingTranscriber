@@ -62,6 +62,11 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
     private val _compatModel = MutableStateFlow("")
     val compatModel: StateFlow<String> = _compatModel
 
+    // ── 通用云端 ASR（阿里 Paraformer/讯飞/腾讯云/百度）共用卡片字段：
+    //    3 个凭证槽位，含义随所选厂家变化（见 CloudAsrProvider.fields） ──
+    private val _asrCreds = List(3) { MutableStateFlow("") }
+    val asrCreds: List<StateFlow<String>> = _asrCreds
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             _tingwuAkId.value = prefs.tingwuAccessKeyId
@@ -74,6 +79,7 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
             _dashScopeApiKey.value = prefs.dashScopeApiKey
             _dashScopeModel.value = prefs.getLlmModel(LlmEngineType.DASHSCOPE_CLOUD)
             refreshCompatFieldsBlocking(prefs.preferredLlmEngine)
+            refreshAsrFieldsBlocking(prefs.preferredAsrEngine)
         }
     }
 
@@ -163,6 +169,29 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearCompatConfig(type: LlmEngineType) {
         saveCompatConfig(type, "", "")
+    }
+
+    // ── 通用云端 ASR（共用卡片） ──
+
+    /** 切换到通用云端 ASR 厂家时，把该厂家已存的凭证换装进共用卡片 */
+    fun refreshAsrFields(type: AsrEngineType) {
+        viewModelScope.launch(Dispatchers.IO) { refreshAsrFieldsBlocking(type) }
+    }
+
+    private fun refreshAsrFieldsBlocking(type: AsrEngineType) {
+        if (com.example.meetingtranscriber.engine.asr.CloudAsrProvider.of(type) == null) return
+        _asrCreds.forEachIndexed { i, flow -> flow.value = prefs.getAsrCred(type, i) }
+    }
+
+    fun saveAsrCreds(type: AsrEngineType, creds: List<String>) {
+        _asrCreds.forEachIndexed { i, flow -> flow.value = creds.getOrElse(i) { "" } }
+        viewModelScope.launch(Dispatchers.IO) {
+            repeat(3) { i -> prefs.setAsrCred(type, i, creds.getOrElse(i) { "" }) }
+        }
+    }
+
+    fun clearAsrCreds(type: AsrEngineType) {
+        saveAsrCreds(type, listOf("", "", ""))
     }
 
     fun clearTingwuKeys() {

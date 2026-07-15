@@ -88,11 +88,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 引擎角标回填（须在 IO 线程：触碰 securePrefs + 模型文件 stat） */
     private fun refreshEngineBadges() {
-        (asrHasKey as MutableStateFlow).value = when (prefs.preferredAsrEngine) {
+        (asrHasKey as MutableStateFlow).value = when (val asrType = prefs.preferredAsrEngine) {
             AsrEngineType.FUNASR_CLOUD -> prefs.hasFunAsrCloudUrl()
             AsrEngineType.TINGWU_CLOUD -> prefs.hasTingwuKeys()
             AsrEngineType.VOLCENGINE_CLOUD -> prefs.hasVolcengineKeys()
             AsrEngineType.FUNASR_LOCAL -> true
+            // 阿里 Paraformer/讯飞/腾讯云/百度 等通用云端 ASR
+            else -> com.example.meetingtranscriber.engine.asr.CloudAsrProvider
+                .of(asrType)?.hasKeys(prefs) ?: false
         }
         (llmHasKey as MutableStateFlow).value = when (val type = prefs.preferredLlmEngine) {
             LlmEngineType.QWEN_LOCAL -> modelDownloadManager.isModelDownloaded()

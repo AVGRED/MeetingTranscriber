@@ -3,6 +3,7 @@ package com.example.meetingtranscriber.engine
 import android.content.Context
 import android.util.Log
 import com.example.meetingtranscriber.PreferencesManager
+import com.example.meetingtranscriber.engine.asr.CloudAsrProvider
 import com.example.meetingtranscriber.engine.asr.FunAsrCloudEngine
 import com.example.meetingtranscriber.engine.asr.FunAsrEngine
 import com.example.meetingtranscriber.network.NetworkMonitor
@@ -31,6 +32,8 @@ class EngineRouter(
     private var funAsrCloudEngine: FunAsrCloudEngine? = null,
     private var tingwuEngine: AsrEngine? = null,
     private var volcengineEngine: AsrEngine? = null,
+    /** 通用云端 ASR（阿里 Paraformer/讯飞/腾讯云/百度），按类型索引 */
+    private var cloudAsrEngines: Map<AsrEngineType, AsrEngine> = emptyMap(),
     private var qwenEngine: LlmEngine? = null,
     private var doubaoEngine: LlmEngine? = null,
     private var dashScopeEngine: LlmEngine? = null,
@@ -146,6 +149,23 @@ class EngineRouter(
                 } else {
                     throw NoEngineException(
                         "豆包 ASR 密钥未配置。请在「API 配置」页面设置 API Key 或 Access Token。")
+                }
+            }
+
+            // ── 通用云端 ASR（阿里 Paraformer/讯飞/腾讯云/百度） ──
+            cloudAsrEngines.containsKey(preferred) -> {
+                val engine = cloudAsrEngines.getValue(preferred)
+                val hasKeys = CloudAsrProvider.of(preferred)?.hasKeys(prefs) == true
+                if (hasKeys) {
+                    ensureInitializedOrThrow(context, engine)
+                    engine
+                } else if (prefs.autoFallback) {
+                    Log.w(TAG, "${preferred.displayName} 密钥未配置 → 降级到本地 FunASR")
+                    ensureInitializedOrThrow(context, funAsrEngine)
+                    funAsrEngine
+                } else {
+                    throw NoEngineException(
+                        "${preferred.displayName} 密钥未配置。请在「API 配置」页面填写。")
                 }
             }
 

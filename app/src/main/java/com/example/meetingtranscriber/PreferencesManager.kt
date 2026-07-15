@@ -101,6 +101,18 @@ class PreferencesManager(context: Context) {
     fun hasLlmKey(type: LlmEngineType): Boolean = getLlmApiKey(type).isNotBlank()
 
     // ═══════════════════════════════════════════════════════
+    // 通用云端 ASR 凭证（按引擎类型+槽位区分；阿里 Paraformer/讯飞/
+    // 腾讯云/百度各家字段数不同，槽位含义见 CloudAsrProvider.fields）
+    // ═══════════════════════════════════════════════════════
+
+    /** 云端 ASR 凭证（加密存储），slot 0-2 */
+    fun getAsrCred(type: AsrEngineType, slot: Int): String =
+        securePrefs.getString("$KEY_ASR_CRED_PREFIX${type.name}_$slot", "") ?: ""
+
+    fun setAsrCred(type: AsrEngineType, slot: Int, value: String) =
+        securePrefs.edit().putString("$KEY_ASR_CRED_PREFIX${type.name}_$slot", value).apply()
+
+    // ═══════════════════════════════════════════════════════
     // 引擎偏好 (明文存储)
     // ═══════════════════════════════════════════════════════
 
@@ -216,6 +228,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_VOLC_ASR_API_KEY = "volcengine_asr_api_key"
         private const val KEY_VOLC_ASR_TOKEN = "volcengine_asr_access_token"
         private const val KEY_LLM_API_KEY_PREFIX = "llm_api_key_"
+        private const val KEY_ASR_CRED_PREFIX = "asr_cred_"
 
         // 明文 Key
         private const val KEY_ASR_ENGINE = "preferred_asr_engine"

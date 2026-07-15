@@ -41,6 +41,12 @@ class MeetingApplication : Application() {
             funAsrCloudEngine = FunAsrCloudEngine(prefs),
             tingwuEngine = TingwuEngine(prefs),
             volcengineEngine = VolcengineEngine(prefs),
+            cloudAsrEngines = mapOf(
+                com.example.meetingtranscriber.engine.AsrEngineType.PARAFORMER_CLOUD to ParaformerEngine(prefs),
+                com.example.meetingtranscriber.engine.AsrEngineType.XFYUN_CLOUD to XfyunEngine(prefs),
+                com.example.meetingtranscriber.engine.AsrEngineType.TENCENT_CLOUD to TencentAsrEngine(prefs),
+                com.example.meetingtranscriber.engine.AsrEngineType.BAIDU_CLOUD to BaiduAsrEngine(prefs)
+            ),
             qwenEngine = QwenEngine(this),
             doubaoEngine = DoubaoEngine(prefs),
             dashScopeEngine = DashScopeEngine(prefs),

@@ -12,6 +12,7 @@ import androidx.fragment.app.viewModels
 import com.example.meetingtranscriber.databinding.FragmentApiConfigBinding
 import com.example.meetingtranscriber.engine.AsrEngineType
 import com.example.meetingtranscriber.engine.LlmEngineType
+import com.example.meetingtranscriber.engine.asr.CloudAsrProvider
 import com.example.meetingtranscriber.engine.llm.DashScopeEngine
 import com.example.meetingtranscriber.engine.llm.DoubaoEngine
 import com.example.meetingtranscriber.engine.llm.OpenAiCompatProvider
@@ -54,6 +55,9 @@ class ApiConfigFragment : Fragment() {
             val engineType = AsrEngineType.entries[position]
             viewModel.setPreferredAsrEngine(engineType)
             updateAsrCardVisibility(engineType)
+            // 换厂家时把该厂家已存的凭证换装进共用卡片（只在显式切换时拉取，
+            // 避免切回 Tab 重放时覆盖未保存输入）
+            viewModel.refreshAsrFields(engineType)
         }
     }
 
@@ -61,6 +65,29 @@ class ApiConfigFragment : Fragment() {
         binding.cardFunasrCloud.visibility = if (type == AsrEngineType.FUNASR_CLOUD) View.VISIBLE else View.GONE
         binding.cardTingwu.visibility = if (type == AsrEngineType.TINGWU_CLOUD) View.VISIBLE else View.GONE
         binding.cardVolcengine.visibility = if (type == AsrEngineType.VOLCENGINE_CLOUD) View.VISIBLE else View.GONE
+        val provider = CloudAsrProvider.of(type)
+        binding.cardCloudAsr.visibility = if (provider != null) View.VISIBLE else View.GONE
+        if (provider != null) {
+            binding.tvCloudAsrTitle.text = "${type.displayName} 配置"
+            binding.tvCloudAsrNote.text = provider.note
+            val tils = listOf(binding.tilAsrCred1, binding.tilAsrCred2, binding.tilAsrCred3)
+            val edits = listOf(binding.etAsrCred1, binding.etAsrCred2, binding.etAsrCred3)
+            tils.forEachIndexed { i, til ->
+                val field = provider.fields.getOrNull(i)
+                til.visibility = if (field != null) View.VISIBLE else View.GONE
+                if (field != null) {
+                    til.hint = field.first
+                    // 密文字段带小眼睛，明文字段带清除按钮
+                    edits[i].inputType = if (field.second)
+                        android.text.InputType.TYPE_CLASS_TEXT or
+                            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                    else android.text.InputType.TYPE_CLASS_TEXT
+                    til.endIconMode = if (field.second)
+                        com.google.android.material.textfield.TextInputLayout.END_ICON_PASSWORD_TOGGLE
+                    else com.google.android.material.textfield.TextInputLayout.END_ICON_CLEAR_TEXT
+                }
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -178,6 +205,27 @@ class ApiConfigFragment : Fragment() {
             Toast.makeText(requireContext(), "已清除", Toast.LENGTH_SHORT).show()
         }
 
+        // 通用云端 ASR（阿里 Paraformer/讯飞/腾讯云/百度，共用卡片）
+        binding.btnSaveCloudAsr.setOnClickListener {
+            val type = viewModel.preferredAsrEngine.value
+            if (CloudAsrProvider.of(type) == null) return@setOnClickListener
+            viewModel.saveAsrCreds(type, listOf(
+                binding.etAsrCred1.text?.toString()?.trim() ?: "",
+                binding.etAsrCred2.text?.toString()?.trim() ?: "",
+                binding.etAsrCred3.text?.toString()?.trim() ?: ""
+            ))
+            Toast.makeText(requireContext(), "${type.displayName} 配置已保存", Toast.LENGTH_SHORT).show()
+        }
+        binding.btnClearCloudAsr.setOnClickListener {
+            val type = viewModel.preferredAsrEngine.value
+            if (CloudAsrProvider.of(type) == null) return@setOnClickListener
+            viewModel.clearAsrCreds(type)
+            binding.etAsrCred1.text?.clear()
+            binding.etAsrCred2.text?.clear()
+            binding.etAsrCred3.text?.clear()
+            Toast.makeText(requireContext(), "已清除", Toast.LENGTH_SHORT).show()
+        }
+
         // Auto fallback toggle
         binding.switchAutoFallback.setOnCheckedChangeListener { _, isChecked ->
             viewModel.setAutoFallback(isChecked)
@@ -246,6 +294,9 @@ class ApiConfigFragment : Fragment() {
             launch { viewModel.dashScopeModel.collect { setIfDiffers(binding.dropdownDashscopeModel, it) } }
             launch { viewModel.compatApiKey.collect { setIfDiffers(binding.etCompatApiKey, it) } }
             launch { viewModel.compatModel.collect { setIfDiffers(binding.dropdownCompatModel, it) } }
+            launch { viewModel.asrCreds[0].collect { setIfDiffers(binding.etAsrCred1, it) } }
+            launch { viewModel.asrCreds[1].collect { setIfDiffers(binding.etAsrCred2, it) } }
+            launch { viewModel.asrCreds[2].collect { setIfDiffers(binding.etAsrCred3, it) } }
         }
     }
 
@@ -322,6 +373,38 @@ class ApiConfigFragment : Fragment() {
 
             ② 注意：RAM AccessKey 不适用于 DashScope，
             必须使用 DashScope 专属 API Key。
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【阿里 Paraformer】— 实时语音识别
+
+            与通义千问共用 DashScope API Key：
+            https://dashscope.console.aliyun.com/apiKey
+            LLM 里配过 DashScope 就无需再填
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【讯飞实时转写】
+
+            控制台开通「实时语音转写」（有免费时长）：
+            https://console.xfyun.cn/services/rta
+            需 AppID + 实时转写专用 APIKey
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【腾讯云识别】
+
+            ① 密钥（SecretId/SecretKey）：
+            https://console.cloud.tencent.com/cam/capi
+            ② AppID 在账号中心查看，并开通「语音识别」服务
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【百度识别】
+
+            创建语音技术应用（开通实时语音识别）：
+            https://console.bce.baidu.com/ai/#/ai/speech/app/list
+            需 AppID + API Key
 
             ━━━━━━━━━━━━━━━━━━━━━━
 
