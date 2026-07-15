@@ -121,37 +121,6 @@
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
 
-        <!-- Qwen 模型下载进度 -->
-        <com.google.android.material.progressindicator.LinearProgressIndicator
-            android:id="@+id/progress_model_download"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:indeterminate="false"
-            android:visibility="gone"
-            app:trackThickness="6dp" />
-
-        <TextView
-            android:id="@+id/tv_download_status"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textSize="12sp"
-            android:textColor="@color/on_surface_variant"
-            android:visibility="gone" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_download_model"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginTop="8dp"
-            android:text="下载 Qwen 本地模型"
-            android:textSize="13sp"
-            app:cornerRadius="20dp"
-            app:icon="@android:drawable/stat_sys_download"
-            android:visibility="gone" />
-
         <!-- 快速开始 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"

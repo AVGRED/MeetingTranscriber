@@ -22,8 +22,6 @@ import com.example.meetingtranscriber.MainActivity
 import com.example.meetingtranscriber.R
 import com.example.meetingtranscriber.data.model.MeetingInfo
 import com.example.meetingtranscriber.databinding.FragmentHomeBinding
-import com.example.meetingtranscriber.engine.llm.ModelDownloadManager
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -101,9 +99,6 @@ class HomeFragment : Fragment() {
         binding.btnViewAll.setOnClickListener {
             (requireActivity() as MainActivity).navigateToTab(R.id.nav_history)
         }
-        binding.btnDownloadModel.setOnClickListener {
-            viewModel.downloadQwenModel()
-        }
         binding.btnCamera.setOnClickListener { takePhoto() }
         binding.btnGallery.setOnClickListener { openGallery() }
     }
@@ -174,46 +169,6 @@ class HomeFragment : Fragment() {
                         if (hasKey) R.color.status_recording else R.color.status_paused
                     )
                 )
-            }
-        }
-
-        // 下载按钮显示/隐藏
-        launch {
-            viewModel.isModelDownloadNeeded.collect { needed ->
-                binding.btnDownloadModel.visibility =
-                    if (needed) View.VISIBLE else View.GONE
-            }
-        }
-
-        // 模型下载进度
-        launch {
-            viewModel.modelDownloadProgress.collectLatest { state ->
-                when (state.status) {
-                    ModelDownloadManager.DownloadState.Status.IDLE,
-                    ModelDownloadManager.DownloadState.Status.COMPLETED -> {
-                        binding.progressModelDownload.visibility = View.GONE
-                        binding.tvDownloadStatus.visibility = View.GONE
-                    }
-                    ModelDownloadManager.DownloadState.Status.DOWNLOADING -> {
-                        binding.progressModelDownload.visibility = View.VISIBLE
-                        binding.progressModelDownload.progress = state.percent
-                        binding.tvDownloadStatus.visibility = View.VISIBLE
-                        binding.tvDownloadStatus.text =
-                            "Qwen 模型下载中 ${state.percent}% (${state.downloadedMB.toInt()}MB / ${state.totalMB.toInt()}MB)"
-                    }
-                    ModelDownloadManager.DownloadState.Status.VERIFYING -> {
-                        binding.progressModelDownload.visibility = View.VISIBLE
-                        binding.progressModelDownload.isIndeterminate = true
-                        binding.tvDownloadStatus.visibility = View.VISIBLE
-                        binding.tvDownloadStatus.text = "正在校验模型文件..."
-                    }
-                    ModelDownloadManager.DownloadState.Status.ERROR -> {
-                        binding.progressModelDownload.visibility = View.GONE
-                        binding.tvDownloadStatus.visibility = View.VISIBLE
-                        binding.tvDownloadStatus.text = "下载失败: ${state.errorMessage ?: "未知错误"}"
-                    }
-                    else -> {}
-                }
             }
         }
 
