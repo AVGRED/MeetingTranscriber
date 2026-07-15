@@ -372,14 +372,37 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                 synchronized(decodeLock) {
                     try { stream?.release() } catch (_: Exception) {}
                     stream = null
+                    // 模型常驻策略按可用内存自适应：
+                    // - 内存充裕 → 常驻（重载 226MB 模型需 3-4s，是"开始会议卡很久"的主因）
+                    // - 可用 <1.5GB 或系统 lowMemory → 释放换内存，下次开会重载
+                    //   （有 LOADING 横幅反馈，不再是无提示假死）
+                    // recognizer 的释放必须在 decodeLock 内：interim/final decode
+                    // 均在此锁内二次确认 recognizer 非空
+                    if (recognizer != null && isMemoryPressure()) {
+                        Log.i(TAG, "内存紧张，释放 ASR 模型（下次开会重载）")
+                        try { recognizer?.release() } catch (_: Exception) {}
+                        recognizer = null
+                    }
                 }
-                // 模型常驻内存不释放：重载 226MB 模型需 3-4s，是"开始会议卡很久"的主因；
                 // initialize() 幂等，下次直达 READY；进程退出由系统回收
                 _engineStatus.value = if (recognizer != null)
                     EngineStatus(EngineState.READY, "模型已就绪")
                 else EngineStatus(EngineState.IDLE)
-                Log.i(TAG, "会话已释放（模型常驻）")
+                Log.i(TAG, if (recognizer != null) "会话已释放（模型常驻）" else "会话与模型均已释放")
             }
+        }
+    }
+
+    /** 可用内存是否已紧张（dispose 时决定模型是否退常驻） */
+    private fun isMemoryPressure(): Boolean {
+        return try {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE)
+                as android.app.ActivityManager
+            val mi = android.app.ActivityManager.MemoryInfo()
+            am.getMemoryInfo(mi)
+            mi.lowMemory || mi.availMem < LOW_MEM_RELEASE_THRESHOLD
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -477,5 +500,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
         const val ASSET_MODEL_PATH = "models"
         const val MODEL_FILE_NAME = "sense-voice-small-cn.onnx"
         const val TOKENS_FILE_NAME = "tokens.txt"
+        /** dispose 时可用内存低于此值则释放模型退常驻（换取纪要生成/前台内存余量） */
+        private const val LOW_MEM_RELEASE_THRESHOLD = 1_500L * 1024 * 1024
     }
 }

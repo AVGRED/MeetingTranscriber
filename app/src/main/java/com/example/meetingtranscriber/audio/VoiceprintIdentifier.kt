@@ -165,6 +165,23 @@ class VoiceprintIdentifier(private val scope: CoroutineScope) {
         nativeMutex.withLock { speakers.clear() }
     }
 
+    /**
+     * 仅释放 native 模型（27MB CAM++），保留线程池与回调，可再 initialize——
+     * 会议结束后的内存编排用（纪要生成要加载 1.1GB Qwen，先腾出无用会话）。
+     * 释放任务经声纹专用单线程队列排队：FIFO 保证已入队的最后一轮判定
+     * 先跑完（此时 extractor 仍有效），之后才释放。
+     */
+    fun releaseModel() {
+        if (extractor == null) return
+        scope.launch(embeddingDispatcher) {
+            nativeMutex.withLock {
+                try { extractor?.release() } catch (_: Exception) {}
+                extractor = null
+            }
+            Log.i(TAG, "声纹模型已释放（会后内存编排，下次开会重载）")
+        }
+    }
+
     /** 释放 native 资源。若识别任务仍在跑则跳过，交由 finalize() 兜底。 */
     fun release() {
         val ext = extractor

@@ -402,6 +402,11 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             }
             transcriptionUseCase.stop()
 
+            // 内存编排：会议已结束，声纹模型（27MB）无用武之地，先释放——
+            // 纪要若走本地 Qwen 要加载 1.1GB，8GB 设备须先腾内存；
+            // 下次 startMeeting 会重新 initialize（<300ms）
+            if (voiceprintEnabled) voiceprint.releaseModel()
+
             val meeting = meetingRepository.endMeeting(currentMeetingId)
             recoveryStateDao.delete(currentMeetingId)
 
@@ -542,6 +547,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
     private fun generateSummary(meeting: MeetingInfo) {
         viewModelScope.launch {
+            var progressJob: Job? = null
             try {
                 val segments = transcriptRepository.getSegmentsOnce(meeting.id)
                 // 无有效转写（如全部为静音幻觉被过滤）→ 不生成纪要，避免 LLM 对空文本编造内容
@@ -553,7 +559,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 _uiState.update { it.copy(isGeneratingSummary = true, summaryProgress = 0f) }
 
                 // 收集摘要进度
-                val progressJob = launch {
+                progressJob = launch {
                     summaryUseCase.generationProgress.collect { progress ->
                         _uiState.update { it.copy(summaryProgress = progress) }
                     }
@@ -573,14 +579,25 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 }
                 meetingRepository.saveSummary(meeting.id, summary)
 
-                // 导出 TXT 纪要文件
-                saveSummaryToFile(meeting, segments, summary)
+                // 导出 TXT 纪要文件（长会议全文可达数百 KB，文件写移出主线程）
+                withContext(Dispatchers.IO) {
+                    saveSummaryToFile(meeting, segments, summary)
+                }
 
-                progressJob.cancel()
                 _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 1f) }
             } catch (e: Exception) {
                 android.util.Log.w("MeetingViewModel", "纪要生成失败: ${e.message}")
                 _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 0f) }
+            } finally {
+                // 进度收集协程在 finally 统一取消（原先异常路径不取消 → 协程泄漏）
+                progressJob?.cancel()
+                // 内存编排：本地 Qwen 用完立即卸载（1.1GB mmap 不能常驻 8GB 设备；
+                // 云端引擎 dispose 是轻量清理）。同会话再次生成会重载模型（数秒）
+                try {
+                    summaryUseCase.dispose()
+                } catch (e: Exception) {
+                    android.util.Log.w("MeetingViewModel", "summaryUseCase.dispose 失败: ${e.message}")
+                }
             }
         }
     }
