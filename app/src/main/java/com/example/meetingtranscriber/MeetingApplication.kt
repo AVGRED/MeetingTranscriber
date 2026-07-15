@@ -67,7 +67,7 @@ class MeetingApplication : Application() {
             }
             cleanupExpiredRecordings()
             cleanupLegacyAsrModelCopy()
-            AudioCacheManager.cleanup(this@MeetingApplication)
+            AudioCacheManager.trim(this@MeetingApplication)
             StorageMonitor.maybeNotify(this@MeetingApplication)
             val info = UpdateChecker.check(this@MeetingApplication)
             if (info != null) {
