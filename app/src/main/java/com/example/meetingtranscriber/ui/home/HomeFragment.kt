@@ -15,7 +15,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.meetingtranscriber.MainActivity
 import com.example.meetingtranscriber.R
 import com.example.meetingtranscriber.data.model.MeetingInfo
@@ -138,15 +140,18 @@ class HomeFragment : Fragment() {
     }
 
     private fun observeState() {
-        val scope = viewLifecycleOwner.lifecycleScope
+        // repeatOnLifecycle(STARTED)：Tab 被 setMaxLifecycle(CREATED) 降级隐藏时
+        // 全部收集器自动停跑，切回时自动恢复并重放最新 StateFlow 值
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
 
         // 引擎状态
-        scope.launch {
+        launch {
             viewModel.asrEngineName.collect { name ->
                 binding.tvAsrEngine.text = name
             }
         }
-        scope.launch {
+        launch {
             viewModel.asrHasKey.collect { hasKey ->
                 val dot = binding.dotAsrStatus.background as? GradientDrawable
                 dot?.setColor(
@@ -156,12 +161,12 @@ class HomeFragment : Fragment() {
                 )
             }
         }
-        scope.launch {
+        launch {
             viewModel.llmEngineName.collect { name ->
                 binding.tvLlmEngine.text = name
             }
         }
-        scope.launch {
+        launch {
             viewModel.llmHasKey.collect { hasKey ->
                 val dot = binding.dotLlmStatus.background as? GradientDrawable
                 dot?.setColor(
@@ -173,7 +178,7 @@ class HomeFragment : Fragment() {
         }
 
         // 下载按钮显示/隐藏
-        scope.launch {
+        launch {
             viewModel.isModelDownloadNeeded.collect { needed ->
                 binding.btnDownloadModel.visibility =
                     if (needed) View.VISIBLE else View.GONE
@@ -181,7 +186,7 @@ class HomeFragment : Fragment() {
         }
 
         // 模型下载进度
-        scope.launch {
+        launch {
             viewModel.modelDownloadProgress.collectLatest { state ->
                 when (state.status) {
                     ModelDownloadManager.DownloadState.Status.IDLE,
@@ -213,31 +218,33 @@ class HomeFragment : Fragment() {
         }
 
         // 统计数字
-        scope.launch {
+        launch {
             viewModel.meetingCount.collect { count ->
                 binding.tvMeetingCount.text = count.toString()
             }
         }
-        scope.launch {
+        launch {
             viewModel.recordingCount.collect { count ->
                 binding.tvRecordingCount.text = count.toString()
             }
         }
-        scope.launch {
+        launch {
             viewModel.recordingLabel.collect { label ->
                 binding.tvRecordingLabel.text = label
             }
         }
-        scope.launch {
+        launch {
             viewModel.freeStorageGB.collect { gb ->
                 binding.tvFreeStorage.text = gb
             }
         }
 
         // 最近会议
-        scope.launch {
+        launch {
             viewModel.recentMeetings.collect { meetings ->
                 renderRecentMeetings(meetings)
+            }
+        }
             }
         }
     }

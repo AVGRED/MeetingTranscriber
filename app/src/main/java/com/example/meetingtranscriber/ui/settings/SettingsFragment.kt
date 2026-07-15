@@ -13,6 +13,7 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.meetingtranscriber.data.db.VocabularyEntity
 import com.example.meetingtranscriber.databinding.FragmentSettingsBinding
@@ -153,18 +154,22 @@ class SettingsFragment : Fragment() {
             updateStorageInfo()
         }
 
+        // repeatOnLifecycle(STARTED)：Tab 隐藏时停收，切回自动恢复
         viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.vocabularies.collectLatest { list ->
-                adapter.submitList(list)
-                binding.tvEmpty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
-            }
-        }
-
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.errorMessage.collect { msg ->
-                if (msg != null) {
-                    Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
-                    viewModel.clearError()
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                launch {
+                    viewModel.vocabularies.collectLatest { list ->
+                        adapter.submitList(list)
+                        binding.tvEmpty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+                    }
+                }
+                launch {
+                    viewModel.errorMessage.collect { msg ->
+                        if (msg != null) {
+                            Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
+                            viewModel.clearError()
+                        }
+                    }
                 }
             }
         }

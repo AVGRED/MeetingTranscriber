@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.meetingtranscriber.R
 import com.example.meetingtranscriber.audio.AudioCaptureService
@@ -182,36 +183,42 @@ class MeetingFragment : Fragment() {
     }
 
     private fun observeState() {
+        // repeatOnLifecycle(STARTED)：Tab 隐藏时停收（会议逻辑全在 ViewModel，
+        // 录音/转写不受影响），切回时 StateFlow 重放最新状态恢复 UI
         viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.segments.collectLatest { segments ->
-                adapter.submitSegments(segments) {
-                    // 仅当已停在底部时跳到最新（无动画）：不打断往回翻看，
-                    // 也避免每句 final 都触发平滑滚动动画
-                    if (segments.isNotEmpty() && !binding.rvTranscript.canScrollVertically(1)) {
-                        binding.rvTranscript.scrollToPosition(adapter.itemCount - 1)
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                launch {
+                    viewModel.segments.collectLatest { segments ->
+                        adapter.submitSegments(segments) {
+                            // 仅当已停在底部时跳到最新（无动画）：不打断往回翻看，
+                            // 也避免每句 final 都触发平滑滚动动画
+                            if (segments.isNotEmpty() && !binding.rvTranscript.canScrollVertically(1)) {
+                                binding.rvTranscript.scrollToPosition(adapter.itemCount - 1)
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        // 拆三路收集：interim（~4次/s）、计时器（1次/s）、其余低频状态——
-        // 任何一路发射不再全量刷 20+ 个 view（低端机持续掉帧源之一）
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.uiState.map { it.interimText }.distinctUntilChanged().collect { text ->
-                adapter.setInterimText(text.takeIf { it.isNotBlank() })
+                // 拆三路收集：interim（~4次/s）、计时器（1次/s）、其余低频状态——
+                // 任何一路发射不再全量刷 20+ 个 view（低端机持续掉帧源之一）
+                launch {
+                    viewModel.uiState.map { it.interimText }.distinctUntilChanged().collect { text ->
+                        adapter.setInterimText(text.takeIf { it.isNotBlank() })
+                    }
+                }
+                launch {
+                    viewModel.uiState.map { it.elapsedSeconds }.distinctUntilChanged().collect { sec ->
+                        binding.tvTimer.text =
+                            "%02d:%02d:%02d".format(sec / 3600, (sec % 3600) / 60, sec % 60)
+                    }
+                }
+                launch {
+                    viewModel.uiState
+                        .map { it.copy(interimText = "", elapsedSeconds = 0) }
+                        .distinctUntilChanged()
+                        .collect { updateUI(it) }
+                }
             }
-        }
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.uiState.map { it.elapsedSeconds }.distinctUntilChanged().collect { sec ->
-                binding.tvTimer.text =
-                    "%02d:%02d:%02d".format(sec / 3600, (sec % 3600) / 60, sec % 60)
-            }
-        }
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.uiState
-                .map { it.copy(interimText = "", elapsedSeconds = 0) }
-                .distinctUntilChanged()
-                .collect { updateUI(it) }
         }
     }
 

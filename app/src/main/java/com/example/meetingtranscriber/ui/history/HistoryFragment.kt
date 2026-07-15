@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 
 import com.example.meetingtranscriber.R
@@ -103,17 +104,21 @@ class HistoryFragment : Fragment() {
         // 标签筛选 chips
         setupTagChips()
 
+        // repeatOnLifecycle(STARTED)：Tab 隐藏时停收 Room Flow，切回自动恢复
         viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.meetings.collect { meetings ->
-                adapter.submitList(meetings)
-                binding.tvEmpty.visibility = if (meetings.isEmpty()) View.VISIBLE else View.GONE
-            }
-        }
-
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.showArchived.collect { archived ->
-                binding.btnRecycleBin.text = if (archived) "返回列表" else "回收站"
-                binding.layoutTagChips.visibility = if (archived) View.GONE else View.VISIBLE
+            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                launch {
+                    viewModel.meetings.collect { meetings ->
+                        adapter.submitList(meetings)
+                        binding.tvEmpty.visibility = if (meetings.isEmpty()) View.VISIBLE else View.GONE
+                    }
+                }
+                launch {
+                    viewModel.showArchived.collect { archived ->
+                        binding.btnRecycleBin.text = if (archived) "返回列表" else "回收站"
+                        binding.layoutTagChips.visibility = if (archived) View.GONE else View.VISIBLE
+                    }
+                }
             }
         }
     }

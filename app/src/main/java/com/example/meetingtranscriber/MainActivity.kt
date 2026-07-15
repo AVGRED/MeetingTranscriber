@@ -132,10 +132,16 @@ class MainActivity : AppCompatActivity() {
         val existing = supportFragmentManager.findFragmentByTag(tag)
         supportFragmentManager.beginTransaction().apply {
             supportFragmentManager.fragments.forEach {
-                if (it.isVisible) hide(it)
+                if (it.isVisible && it !== existing) {
+                    hide(it)
+                    // 降级到 CREATED：view 保留（切回无白屏），但 STARTED 门槛的
+                    // repeatOnLifecycle 收集器全部停跑——隐藏 Tab 不再消耗主线程
+                    setMaxLifecycle(it, androidx.lifecycle.Lifecycle.State.CREATED)
+                }
             }
             if (existing != null) {
                 show(existing)
+                setMaxLifecycle(existing, androidx.lifecycle.Lifecycle.State.RESUMED)
             } else {
                 add(R.id.fragment_container, fragment, tag)
             }

@@ -5,15 +5,17 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import com.example.meetingtranscriber.databinding.FragmentApiConfigBinding
 import com.example.meetingtranscriber.engine.AsrEngineType
 import com.example.meetingtranscriber.engine.LlmEngineType
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 
 class ApiConfigFragment : Fragment() {
 
@@ -34,7 +36,6 @@ class ApiConfigFragment : Fragment() {
         setupLlmDropdown()
         setupClickListeners()
         observeState()
-        loadInitialValues()
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -156,42 +157,63 @@ class ApiConfigFragment : Fragment() {
     // ═══════════════════════════════════════════════════════════
 
     private fun observeState() {
-        // ASR preference
-        viewModel.preferredAsrEngine.collectLatestIn(lifecycleScope) { type ->
-            if (binding.dropdownAsr.text?.toString() != type.displayName) {
-                binding.dropdownAsr.setText(type.displayName, false)
+        // 引擎偏好/开关：repeatOnLifecycle(STARTED)——Tab 隐藏时停收；
+        // 同时改用 viewLifecycleOwner（原 fragment lifecycleScope 会在视图
+        // 重建时堆叠收集器并触碰过期 binding）
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // ASR preference
+                launch {
+                    viewModel.preferredAsrEngine.collect { type ->
+                        if (binding.dropdownAsr.text?.toString() != type.displayName) {
+                            binding.dropdownAsr.setText(type.displayName, false)
+                        }
+                        updateAsrCardVisibility(type)
+                    }
+                }
+                // LLM preference
+                launch {
+                    viewModel.preferredLlmEngine.collect { type ->
+                        if (binding.dropdownLlm.text?.toString() != type.displayName) {
+                            binding.dropdownLlm.setText(type.displayName, false)
+                        }
+                        updateLlmCardVisibility(type)
+                    }
+                }
+                launch {
+                    viewModel.autoFallback.collect { enabled ->
+                        binding.switchAutoFallback.isChecked = enabled
+                    }
+                }
+                launch {
+                    viewModel.funasrCloudUrl.collect { url ->
+                        if (binding.etFunasrUrl.text?.toString() != url) {
+                            binding.etFunasrUrl.setText(url)
+                        }
+                    }
+                }
             }
-            updateAsrCardVisibility(type)
         }
 
-        // LLM preference
-        viewModel.preferredLlmEngine.collectLatestIn(lifecycleScope) { type ->
-            if (binding.dropdownLlm.text?.toString() != type.displayName) {
-                binding.dropdownLlm.setText(type.displayName, false)
-            }
-            updateLlmCardVisibility(type)
-        }
-
-        viewModel.autoFallback.collectLatestIn(lifecycleScope) { enabled ->
-            binding.switchAutoFallback.isChecked = enabled
-        }
-
-        viewModel.funasrCloudUrl.collectLatestIn(lifecycleScope) { url ->
-            if (binding.etFunasrUrl.text?.toString() != url) {
-                binding.etFunasrUrl.setText(url)
-            }
+        // 密钥输入框：ViewModel 在 IO 解密后异步回填 StateFlow（构造函数不再同步
+        // 解密 8 个值），这里持续同步到输入框。刻意不进 repeatOnLifecycle——
+        // 切回 Tab 重放最新已存值会覆盖用户未保存的输入；这些流仅在回填与
+        // 保存/清除时发射，隐藏期间零开销
+        viewLifecycleOwner.lifecycleScope.launch {
+            launch { viewModel.tingwuAkId.collect { setIfDiffers(binding.etTingwuAkId, it) } }
+            launch { viewModel.tingwuAkSecret.collect { setIfDiffers(binding.etTingwuAkSecret, it) } }
+            launch { viewModel.tingwuAppKey.collect { setIfDiffers(binding.etTingwuAppKey, it) } }
+            launch { viewModel.volcAsrApiKey.collect { setIfDiffers(binding.etVolcApiKey, it) } }
+            launch { viewModel.volcAsrToken.collect { setIfDiffers(binding.etVolcToken, it) } }
+            launch { viewModel.arkApiKey.collect { setIfDiffers(binding.etArkApiKey, it) } }
+            launch { viewModel.arkEndpointId.collect { setIfDiffers(binding.etArkEndpointId, it) } }
+            launch { viewModel.dashScopeApiKey.collect { setIfDiffers(binding.etDashscopeApiKey, it) } }
         }
     }
 
-    private fun loadInitialValues() {
-        binding.etTingwuAkId.setText(viewModel.tingwuAkId.value)
-        binding.etTingwuAkSecret.setText(viewModel.tingwuAkSecret.value)
-        binding.etTingwuAppKey.setText(viewModel.tingwuAppKey.value)
-        binding.etVolcApiKey.setText(viewModel.volcAsrApiKey.value)
-        binding.etVolcToken.setText(viewModel.volcAsrToken.value)
-        binding.etArkApiKey.setText(viewModel.arkApiKey.value)
-        binding.etArkEndpointId.setText(viewModel.arkEndpointId.value)
-        binding.etDashscopeApiKey.setText(viewModel.dashScopeApiKey.value)
+    /** 值有变化才 setText：避免光标跳动，也不打扰正在输入的用户 */
+    private fun setIfDiffers(edit: EditText, value: String) {
+        if (edit.text?.toString() != value) edit.setText(value)
     }
 
     override fun onDestroyView() {
@@ -266,12 +288,4 @@ class ApiConfigFragment : Fragment() {
             .setPositiveButton("知道了", null)
             .show()
     }
-}
-
-/** Flow collection helper — avoids boilerplate */
-private fun <T> kotlinx.coroutines.flow.Flow<T>.collectLatestIn(
-    scope: androidx.lifecycle.LifecycleCoroutineScope,
-    action: suspend (T) -> Unit
-) {
-    scope.launch { this@collectLatestIn.collectLatest { action(it) } }
 }
