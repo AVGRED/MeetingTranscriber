@@ -37,20 +37,20 @@
             android:textColor="@color/on_background"
             android:textStyle="bold" />
 
-        <HorizontalScrollView
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:scrollbars="none">
+            android:hint="选择引擎">
 
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/chip_group_asr"
-                android:layout_width="wrap_content"
+            <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                android:id="@+id/dropdown_asr"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:singleSelection="true"
-                app:checkedChip="@+id/chip_asr_funasr_cloud" />
-
-        </HorizontalScrollView>
+                android:inputType="none"
+                android:textSize="14sp" />
+        </com.google.android.material.textfield.TextInputLayout>
 
         <!-- FunASR 云端配置 -->
         <com.google.android.material.card.MaterialCardView
@@ -252,20 +252,20 @@
             android:textColor="@color/on_background"
             android:textStyle="bold" />
 
-        <HorizontalScrollView
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:scrollbars="none">
+            android:hint="选择模型">
 
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/chip_group_llm"
-                android:layout_width="wrap_content"
+            <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                android:id="@+id/dropdown_llm"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:singleSelection="true"
-                app:checkedChip="@+id/chip_llm_qwen" />
-
-        </HorizontalScrollView>
+                android:inputType="none"
+                android:textSize="14sp" />
+        </com.google.android.material.textfield.TextInputLayout>
 
         <!-- 豆包 LLM 配置 -->
         <com.google.android.material.card.MaterialCardView
@@ -440,6 +440,19 @@
                     android:checked="true" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===== API 接入说明入口 ===== -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_api_guide"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="16dp"
+            android:text="📖 查看 API 接入说明"
+            android:textSize="14sp"
+            app:cornerRadius="24dp"
+            app:icon="@android:drawable/ic_menu_info_details"
+            app:iconGravity="textStart" />
 
     </LinearLayout>
 </ScrollView>

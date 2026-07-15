@@ -67,7 +67,7 @@ enum class AsrEngineType(
     val dialectSupport: List<String> = listOf("普通话", "四川话", "粤语")
 ) {
     FUNASR_CLOUD("FunASR 云端", isCloud = true),
-    FUNASR_LOCAL("FunASR 离线", isCloud = false),
+    FUNASR_LOCAL("FunASR", isCloud = false),
     TINGWU_CLOUD("通义听悟", isCloud = true),
     VOLCENGINE_CLOUD("豆包 ASR", isCloud = true, dialectSupport = listOf("普通话"))
 }
@@ -96,5 +96,8 @@ data class AsrSentence(
     val speakerId: String,
     val startTimeMs: Long,
     val endTimeMs: Long,
-    val isFinal: Boolean = true
+    val isFinal: Boolean = true,
+    /** 上一句因软/硬截断在语流中间收尾，本句是它的续段（UI 层可据此合并显示）。
+     *  仅本地 FunASR 引擎产生；云端引擎恒为 false */
+    val isContinuation: Boolean = false
 )

@@ -15,9 +15,12 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.meetingtranscriber.data.model.TranscriptSegment
 import com.example.meetingtranscriber.databinding.FragmentDetailBinding
 import com.example.meetingtranscriber.ui.export.ExportHelper
+import com.example.meetingtranscriber.ui.export.QrShareDialog
 import com.example.meetingtranscriber.ui.meeting.TranscriptAdapter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class DetailFragment : Fragment() {
 
@@ -36,6 +39,7 @@ class DetailFragment : Fragment() {
 
     private val viewModel: DetailViewModel by viewModels()
     private lateinit var adapter: TranscriptAdapter
+    private var playerController: AudioPlayerController? = null
     private var searchDebounceJob: kotlinx.coroutines.Job? = null
 
     override fun onCreateView(
@@ -57,6 +61,8 @@ class DetailFragment : Fragment() {
         adapter = TranscriptAdapter(onSpeakerClick = { segment -> showRenameDialog(segment) })
         binding.rvTranscript.adapter = adapter
         binding.rvTranscript.layoutManager = LinearLayoutManager(requireContext())
+
+        playerController = AudioPlayerController(binding, viewLifecycleOwner.lifecycleScope)
 
         binding.btnBack.setOnClickListener {
             parentFragmentManager.popBackStack()
@@ -114,20 +120,32 @@ class DetailFragment : Fragment() {
         }
 
         binding.btnRegenerateSummary.setOnClickListener {
-            if (viewModel.isSummaryEdited.value) {
-                AlertDialog.Builder(requireContext())
-                    .setTitle("撤销修改")
-                    .setMessage("恢复到 AI 生成的原始纪要？")
-                    .setPositiveButton("恢复") { _, _ -> viewModel.restoreOriginal() }
-                    .setNegativeButton("取消", null)
-                    .show()
-            } else {
-                AlertDialog.Builder(requireContext())
-                    .setTitle("重新生成纪要")
-                    .setMessage("当前纪要将被 AI 重新生成的内容覆盖，是否继续？")
-                    .setPositiveButton("覆盖") { _, _ -> viewModel.regenerateSummary() }
-                    .setNegativeButton("取消", null)
-                    .show()
+            when {
+                viewModel.originalSummary.value == null -> {
+                    if (viewModel.segments.value.isEmpty()) {
+                        Toast.makeText(requireContext(), "暂无转写内容，无法生成纪要", Toast.LENGTH_SHORT).show()
+                    } else {
+                        // 尚无纪要，直接生成，无需覆盖确认
+                        Toast.makeText(requireContext(), "正在生成纪要…", Toast.LENGTH_SHORT).show()
+                        viewModel.regenerateSummary()
+                    }
+                }
+                viewModel.isSummaryEdited.value -> {
+                    AlertDialog.Builder(requireContext())
+                        .setTitle("撤销修改")
+                        .setMessage("恢复到 AI 生成的原始纪要？")
+                        .setPositiveButton("恢复") { _, _ -> viewModel.restoreOriginal() }
+                        .setNegativeButton("取消", null)
+                        .show()
+                }
+                else -> {
+                    AlertDialog.Builder(requireContext())
+                        .setTitle("重新生成纪要")
+                        .setMessage("当前纪要将被 AI 重新生成的内容覆盖，是否继续？")
+                        .setPositiveButton("覆盖") { _, _ -> viewModel.regenerateSummary() }
+                        .setNegativeButton("取消", null)
+                        .show()
+                }
             }
         }
 
@@ -137,7 +155,10 @@ class DetailFragment : Fragment() {
             override fun afterTextChanged(s: android.text.Editable?) {
                 val current = s?.toString() ?: ""
                 val original = viewModel.originalSummary.value
-                viewModel.setSummaryEdited(original != null && current != original)
+                // 无原始纪要时，输入非空即视为已编辑（允许手动撰写并保存）
+                viewModel.setSummaryEdited(
+                    if (original == null) current.isNotBlank() else current != original
+                )
             }
         })
 
@@ -150,19 +171,36 @@ class DetailFragment : Fragment() {
                         binding.tvTitle.text = meeting.title
                         binding.tvInfo.text = "${meeting.formattedStartTime} · ${meeting.formattedDuration}"
                         binding.tvSpeakers.text = "${meeting.speakerCount} 位说话人 · ${meeting.segmentCount} 条记录"
-                        if (!meeting.summary.isNullOrBlank()) {
-                            binding.layoutSummary.visibility = View.VISIBLE
-                            if (!viewModel.isSummaryEdited.value) {
-                                binding.etSummary.setText(meeting.summary)
-                            }
+                        // 纪要区常显：转写 + 纪要合并为一条完整记录
+                        binding.layoutSummary.visibility = View.VISIBLE
+                        if (meeting.summary.isNullOrBlank()) {
+                            binding.etSummary.hint = "暂无纪要，可点击生成"
+                            binding.btnRegenerateSummary.text = "生成纪要"
+                        } else if (!viewModel.isSummaryEdited.value) {
+                            binding.etSummary.setText(meeting.summary)
                         }
+                        playerController?.bind(meeting.audioFilePath)
                     }
                 }
             }
             launch {
                 viewModel.isSummaryEdited.collect { edited ->
                     binding.btnSaveSummary.isEnabled = edited
-                    binding.btnRegenerateSummary.text = if (edited) "撤销修改" else "重新生成"
+                    if (viewModel.originalSummary.value != null) {
+                        binding.btnRegenerateSummary.text = if (edited) "撤销修改" else "重新生成"
+                    }
+                }
+            }
+            // 纪要生成/加载完成后刷新展示（meeting StateFlow 同 id 不会重发）
+            launch {
+                viewModel.originalSummary.collect { original ->
+                    if (original != null) {
+                        if (!viewModel.isSummaryEdited.value) {
+                            binding.etSummary.setText(original)
+                        }
+                        binding.btnRegenerateSummary.text =
+                            if (viewModel.isSummaryEdited.value) "撤销修改" else "重新生成"
+                    }
                 }
             }
             // 控制规整按钮
@@ -217,18 +255,25 @@ class DetailFragment : Fragment() {
             return
         }
 
-        val formats = arrayOf("TXT 文本", "Word 文档", "PDF 文件")
+        val formats = arrayOf("TXT 文本", "Word 文档", "PDF 文件", "扫码下载（文档+录音）")
         val mimeTypes = arrayOf("text/plain", "application/msword", "application/pdf")
 
         AlertDialog.Builder(requireContext())
             .setTitle("导出会议记录")
             .setItems(formats) { _, which ->
+                if (which == 3) {
+                    QrShareDialog.show(this, meeting, segments)
+                    return@setItems
+                }
                 viewLifecycleOwner.lifecycleScope.launch {
-                    val file = when (which) {
-                        0 -> ExportHelper.exportTxt(requireContext(), meeting, segments)
-                        1 -> ExportHelper.exportWord(requireContext(), meeting, segments)
-                        2 -> ExportHelper.exportPdf(requireContext(), meeting, segments)
-                        else -> null
+                    // 文件生成移到 IO：长会议主线程画 PDF/拼文本会冻结数秒
+                    val file = withContext(Dispatchers.IO) {
+                        when (which) {
+                            0 -> ExportHelper.exportTxt(requireContext(), meeting, segments)
+                            1 -> ExportHelper.exportWord(requireContext(), meeting, segments)
+                            2 -> ExportHelper.exportPdf(requireContext(), meeting, segments)
+                            else -> null
+                        }
                     }
                     if (file != null) {
                         AlertDialog.Builder(requireContext())
@@ -250,6 +295,8 @@ class DetailFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        playerController?.release()
+        playerController = null
         searchDebounceJob?.cancel()
         searchDebounceJob = null
         _binding = null

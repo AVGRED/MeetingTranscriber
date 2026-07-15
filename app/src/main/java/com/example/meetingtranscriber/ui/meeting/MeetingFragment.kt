@@ -23,6 +23,8 @@ import com.example.meetingtranscriber.databinding.FragmentMeetingBinding
 import com.example.meetingtranscriber.network.ConnectionState
 import com.example.meetingtranscriber.util.SUPPORTED_LANGUAGES
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class MeetingFragment : Fragment() {
@@ -183,18 +185,33 @@ class MeetingFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.segments.collectLatest { segments ->
                 adapter.submitSegments(segments) {
-                    if (segments.isNotEmpty()) {
-                        binding.rvTranscript.smoothScrollToPosition(adapter.itemCount - 1)
+                    // 仅当已停在底部时跳到最新（无动画）：不打断往回翻看，
+                    // 也避免每句 final 都触发平滑滚动动画
+                    if (segments.isNotEmpty() && !binding.rvTranscript.canScrollVertically(1)) {
+                        binding.rvTranscript.scrollToPosition(adapter.itemCount - 1)
                     }
                 }
             }
         }
 
+        // 拆三路收集：interim（~4次/s）、计时器（1次/s）、其余低频状态——
+        // 任何一路发射不再全量刷 20+ 个 view（低端机持续掉帧源之一）
         viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.uiState.collect { state ->
-                updateUI(state)
-                adapter.setInterimText(state.interimText.takeIf { it.isNotBlank() })
+            viewModel.uiState.map { it.interimText }.distinctUntilChanged().collect { text ->
+                adapter.setInterimText(text.takeIf { it.isNotBlank() })
             }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.uiState.map { it.elapsedSeconds }.distinctUntilChanged().collect { sec ->
+                binding.tvTimer.text =
+                    "%02d:%02d:%02d".format(sec / 3600, (sec % 3600) / 60, sec % 60)
+            }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.uiState
+                .map { it.copy(interimText = "", elapsedSeconds = 0) }
+                .distinctUntilChanged()
+                .collect { updateUI(it) }
         }
     }
 
@@ -245,10 +262,7 @@ class MeetingFragment : Fragment() {
             binding.btnPause.visibility = View.VISIBLE
             binding.btnPause.text = if (state.isPaused) "继续" else "暂停"
 
-            val h = state.elapsedSeconds / 3600
-            val m = (state.elapsedSeconds % 3600) / 60
-            val s = state.elapsedSeconds % 60
-            binding.tvTimer.text = "%02d:%02d:%02d".format(h, m, s)
+            // 计时器由 observeState 的专属收集器更新，此处不再处理
 
             binding.ivStatus.background?.setTint(
                 ContextCompat.getColor(

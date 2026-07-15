@@ -1,9 +1,12 @@
 package com.example.meetingtranscriber.data.repository
 
+import androidx.room.withTransaction
 import com.example.meetingtranscriber.data.db.AppDatabase
 import com.example.meetingtranscriber.data.db.TranscriptEntity
 import com.example.meetingtranscriber.data.model.TranscriptSegment
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 
 class TranscriptRepository(private val db: AppDatabase) {
@@ -13,7 +16,7 @@ class TranscriptRepository(private val db: AppDatabase) {
     fun getSegments(meetingId: Long): Flow<List<TranscriptSegment>> {
         return transcriptDao.getSegmentsByMeeting(meetingId).map { list ->
             list.filter { !it.isInterim }.map { it.toModel() }
-        }
+        }.flowOn(Dispatchers.Default)  // 实体转换移出收集方（Main）上下文
     }
 
     suspend fun getSegmentsOnce(meetingId: Long): List<TranscriptSegment> {
@@ -71,14 +74,31 @@ class TranscriptRepository(private val db: AppDatabase) {
     )
 
     suspend fun updateTopicIds(topicMap: Map<Int, List<TranscriptSegment>>) {
-        for ((topicId, segments) in topicMap) {
-            for (seg in segments) {
-                transcriptDao.updateTopicId(seg.id, topicId)
+        // 单事务：逐条 UPDATE 各自开事务会连发 N 次 fsync + N 轮 Flow 重发
+        db.withTransaction {
+            for ((topicId, segments) in topicMap) {
+                for (seg in segments) {
+                    transcriptDao.updateTopicId(seg.id, topicId)
+                }
             }
         }
     }
 
     suspend fun updateText(segmentId: Long, text: String) {
         transcriptDao.updateText(segmentId, text)
+    }
+
+    /** 批量改文本（规整/撤销用）：单事务，Room Flow 只重发一次 */
+    suspend fun updateTexts(updates: List<Pair<Long, String>>) {
+        db.withTransaction {
+            for ((id, text) in updates) {
+                transcriptDao.updateText(id, text)
+            }
+        }
+    }
+
+    /** 续段合并：按 (meetingId, sentenceId) 定位——内存段的自增 id 在异步插入完成前是 0 */
+    suspend fun mergeContinuation(meetingId: Long, sentenceId: Long, text: String, endTimeMs: Long): Int {
+        return transcriptDao.updateTextAndEnd(meetingId, sentenceId, text, endTimeMs)
     }
 }

@@ -138,7 +138,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("CREATE INDEX IF NOT EXISTS idx_vocab_cross_ref_meeting ON vocabulary_meeting_cross_ref(meetingId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_vocabulary_meeting_cross_ref_meetingId ON vocabulary_meeting_cross_ref(meetingId)")
             }
         }
 
@@ -311,6 +311,9 @@ abstract class AppDatabase : RoomDatabase() {
                 summary = row["summary"],
                 isOffline = (row["isOffline"]?.toIntOrNull() ?: 0) != 0,
                 audioFilePath = row["audioFilePath"],
+                isArchived = (row["isArchived"]?.toIntOrNull() ?: 0) != 0,
+                archivedAt = row["archivedAt"]?.toLongOrNull(),
+                tag = row["tag"],
                 asrEngineType = row["asrEngineType"],
                 llmEngineType = row["llmEngineType"],
                 dialectUsed = row["dialectUsed"]

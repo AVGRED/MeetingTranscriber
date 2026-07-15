@@ -18,6 +18,9 @@ interface MeetingDao {
     @Query("SELECT * FROM meetings WHERE isArchived = 0 ORDER BY startTime DESC")
     fun getAllMeetings(): Flow<List<MeetingEntity>>
 
+    @Query("SELECT * FROM meetings WHERE isArchived = 0 AND title LIKE '%' || :query || '%' ORDER BY startTime DESC")
+    fun searchMeetings(query: String): Flow<List<MeetingEntity>>
+
     @Query("SELECT * FROM meetings WHERE isArchived = 0 ORDER BY startTime DESC")
     suspend fun getAllMeetingsOnce(): List<MeetingEntity>
 
@@ -38,6 +41,9 @@ interface MeetingDao {
 
     @Query("UPDATE meetings SET summary = :summary WHERE id = :meetingId")
     suspend fun updateSummary(meetingId: Long, summary: String)
+
+    @Query("UPDATE meetings SET speakerCount = :count WHERE id = :meetingId")
+    suspend fun updateSpeakerCount(meetingId: Long, count: Int)
 
     @Query("DELETE FROM meetings WHERE id = :meetingId")
     suspend fun deleteById(meetingId: Long): Int

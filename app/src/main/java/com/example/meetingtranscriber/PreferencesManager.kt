@@ -94,9 +94,9 @@ class PreferencesManager(context: Context) {
     /** 首选 ASR 引擎 */
     var preferredAsrEngine: AsrEngineType
         get() {
-            val name = plainPrefs.getString(KEY_ASR_ENGINE, AsrEngineType.FUNASR_CLOUD.name)
-                ?: AsrEngineType.FUNASR_CLOUD.name
-            return try { AsrEngineType.valueOf(name) } catch (_: Exception) { AsrEngineType.FUNASR_CLOUD }
+            val name = plainPrefs.getString(KEY_ASR_ENGINE, AsrEngineType.FUNASR_LOCAL.name)
+                ?: AsrEngineType.FUNASR_LOCAL.name
+            return try { AsrEngineType.valueOf(name) } catch (_: Exception) { AsrEngineType.FUNASR_LOCAL }
         }
         set(value) = plainPrefs.edit().putString(KEY_ASR_ENGINE, value.name).apply()
 

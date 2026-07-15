@@ -4,7 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.meetingtranscriber.audio.AudioCaptureManager
+import com.example.meetingtranscriber.audio.SileroVadDetector
 import com.example.meetingtranscriber.audio.VADDetector
+import com.example.meetingtranscriber.audio.VoiceprintIdentifier
 import com.example.meetingtranscriber.audio.WavPlayer
 import com.example.meetingtranscriber.audio.WavRecorder
 import com.example.meetingtranscriber.data.db.AppDatabase
@@ -42,7 +44,12 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     val summaryUseCase by lazy { SummaryUseCase(engineRouter) }
 
     val audioCaptureManager = AudioCaptureManager()
-    private val vadDetector = VADDetector()
+    private val vadDetector = VADDetector()  // 能量 VAD（Silero 不可用时的回退）
+    /** Silero 神经网络 VAD：能量 VAD 会被 AGC 底噪骗过导致永不切轮（红米实测） */
+    private val sileroVad: SileroVadDetector? = SileroVadDetector.create(application)
+    private val voiceprint = VoiceprintIdentifier(viewModelScope)
+    /** 本次会议是否启用声纹识别（本地 FunASR 引擎 + 模型加载成功） */
+    @Volatile private var voiceprintEnabled = false
     private var wavRecorder: WavRecorder? = null
 
     private val _uiState = MutableStateFlow(MeetingUiState())
@@ -59,44 +66,79 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     private val recoveryStateDao = db.recoveryStateDao()
     private var recoveryJob: Job? = null
     private val pendingSegmentsForRecovery = mutableListOf<TranscriptSegment>()
+    /** 复用实例：Gson() 构造含反射 TypeAdapter 构建，每 5s 新建是无谓开销 */
+    private val gson = Gson()
 
     /** 已处理的 ASR 句子数（避免重复 append） */
     private var processedSentenceCount = 0
 
+    /** 最近一条落地句子的引擎 sentenceId。合并后的段落保留首段 sentenceId，
+     *  三段以上超长句的连续性判断必须用它而不是 last.sentenceId */
+    private var lastAppendedSentenceId = -1L
+
     /** VAD 连续沉默帧计数器（用于说话人切换检测） */
     private var speakerGapFrames = 0
-    /** 两个说话人之间的最小沉默帧数（CHUNK_MS=100ms → 20帧=2秒） */
-    private val speakerGapThresholdFrames = 20
+    /** 停顿阈值（CHUNK_MS=100ms → 5帧=0.5秒）。Silero 自带 0.25s 静音判定，
+     *  实际停顿约 0.75s 即切轮；切分过碎由声纹合并兜底，切不开才是致命的 */
+    private val speakerGapThresholdFrames = 5
 
     init {
-        // --- 真实模式：监听音频 → VAD 过滤（含说话人切换检测）→ EngineRouter ---
-        viewModelScope.launch {
+        // --- 音频采集 → VAD（UI 指示 + 说话人切换）→ ASR 转写 ---
+        // Dispatchers.IO：OfflineRecognizer.decode() 为 CPU 密集操作
+        // SenseVoice 是批处理引擎：只累积音频，decode 在 VAD 停顿或结束会议时触发
+        viewModelScope.launch(Dispatchers.IO) {
             audioCaptureManager.audioStream.collect { pcmData ->
                 if (_uiState.value.isMeetingActive && !_uiState.value.isPaused) {
-                    // 保存到本地 WAV + VAD + ASR 转写
                     wavRecorder?.write(pcmData)
-                    val isVoice = vadDetector.isVoice(pcmData)
+                    val isVoice = sileroVad?.isVoice(pcmData) ?: vadDetector.isVoice(pcmData)
+                    // 透传给本地引擎：静音期跳过 interim decode（volatile 写，无开销）
+                    transcriptionUseCase.setVoiceActive(isVoice)
                     if (_uiState.value.isSpeaking != isVoice) {
                         _uiState.update { it.copy(isSpeaking = isVoice) }
+                        android.util.Log.d("MeetingViewModel",
+                            if (isVoice) "VAD: 语音开始" else "VAD: 静音开始")
                     }
                     if (isVoice) {
-                        // 长时沉默后语音恢复 → 检测到新说话人
-                        if (speakerGapFrames >= speakerGapThresholdFrames) {
-                            transcriptionUseCase.switchSpeaker()
-                            android.util.Log.d("MeetingViewModel",
-                                "检测到说话人切换（沉默 ${speakerGapFrames * 100}ms）")
-                        }
                         speakerGapFrames = 0
-                        transcriptionUseCase.processAudio(pcmData)
+                        // 声纹只累积人声帧（静音会稀释声纹向量）
+                        if (voiceprintEnabled) voiceprint.feed(pcmData)
                     } else {
-                        // 防止计数溢出
+                        // 限制计数上限防止溢出
                         if (speakerGapFrames < speakerGapThresholdFrames + 50) {
                             speakerGapFrames++
                         }
+                        // 沉默刚满阈值当帧立即切句定稿（== 保证每段沉默只触发一次）。
+                        // 不能等语音恢复才切：定稿会被拖到下一人开口后（实测多等
+                        // 1-3s，对方不说话就一直不定稿），且 decode 白白多算静音尾巴
+                        if (speakerGapFrames == speakerGapThresholdFrames) {
+                            try {
+                                val endedTurn = transcriptionUseCase.switchSpeaker()
+                                // 真正切轮时声纹判定上一轮身份（不足 1s 跳过则继续累积）
+                                if (voiceprintEnabled && endedTurn != null) {
+                                    voiceprint.onTurnEnded(endedTurn)
+                                }
+                                android.util.Log.d("MeetingViewModel",
+                                    "沉默 ${speakerGapFrames * 100}ms → 切句定稿")
+                            } catch (e: Exception) {
+                                android.util.Log.e("MeetingViewModel",
+                                    "说话人切换异常: ${e.message}")
+                            }
+                        }
+                    }
+                    // 所有帧无条件喂 ASR：转写不依赖 VAD 判定（VAD 只管切轮与 UI），
+                    // VAD 误判静音时转写不断粮；SenseVoice 批处理引擎，静音无害
+                    try {
+                        transcriptionUseCase.processAudio(pcmData)
+                    } catch (e: Exception) {
+                        android.util.Log.e("MeetingViewModel",
+                            "processAudio 异常: ${e.message}")
                     }
                 }
             }
         }
+
+        // ── 声纹判定结果（每轮必回调一次，label=null 表示无法判定）──
+        voiceprint.onIdentified = ::onSpeakerIdentified
 
         // ── TranscriptionUseCase 状态收集（替代 deprecated asrProvider 回调）──
         viewModelScope.launch {
@@ -111,7 +153,8 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 if (allSentences.size > processedSentenceCount) {
                     for (i in processedSentenceCount until allSentences.size) {
                         val s = allSentences[i]
-                        appendSegment(s.speakerId, s.text, s.startTimeMs, s.endTimeMs, s.sentenceId)
+                        appendSegment(s.speakerId, s.text, s.startTimeMs, s.endTimeMs,
+                            s.sentenceId, s.isContinuation)
                     }
                     processedSentenceCount = allSentences.size
                 }
@@ -122,10 +165,10 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             transcriptionUseCase.engineStatus.collect { status ->
                 val connState = when (status.state) {
                     EngineState.RUNNING -> ConnectionState.CONNECTED
+                    EngineState.READY -> ConnectionState.CONNECTED
                     EngineState.LOADING -> ConnectionState.CONNECTING
                     EngineState.ERROR -> ConnectionState.FAILED
                     EngineState.IDLE -> ConnectionState.DISCONNECTED
-                    else -> ConnectionState.DISCONNECTED
                 }
                 _uiState.update { it.copy(
                     connectionState = connState,
@@ -156,7 +199,21 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         tag: String? = null,
         engineTypeOverride: com.example.meetingtranscriber.engine.AsrEngineType? = null
     ) {
+        // 防止快速双击导致重复启动
+        if (_uiState.value.isMeetingActive) {
+            android.util.Log.w("MeetingViewModel", "会议已在进行中，忽略重复 startMeeting")
+            return
+        }
         viewModelScope.launch {
+            // 清空上次会议的残留数据
+            _segments.value = emptyList()
+            processedSentenceCount = 0
+            lastAppendedSentenceId = -1L
+            speakerLabelMap.clear()
+            lastIdentifiedLabel = null
+            speakerGapFrames = 0
+            pendingSegmentsForRecovery.clear()
+
             if (!audioCaptureManager.hasPermission()) {
                 _uiState.update { it.copy(errorMessage = "缺少录音权限") }
                 return@launch
@@ -177,17 +234,24 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             val recordingsDir = app.getExternalFilesDir("realtime_recordings") ?: app.filesDir
             recordingsDir.mkdirs()
             val wavFile = File(recordingsDir, "realtime_${currentMeetingId}_${System.currentTimeMillis()}.wav")
-            val encKey = CryptoManager.getFileSecretKey()
-            wavRecorder = WavRecorder(wavFile, encKey).also {
-                if (!it.start()) {
-                    android.util.Log.w("MeetingViewModel", "实时音频存档启动失败")
-                    wavRecorder = null
-                } else {
-                    meetingRepository.updateAudioFilePath(currentMeetingId, wavFile.absolutePath)
-                }
+            // Keystore 取密钥 + EncryptedFile 建流是慢操作（低端机数百 ms），移出主线程
+            val recorder = withContext(Dispatchers.IO) {
+                val encKey = CryptoManager.getFileSecretKey()
+                WavRecorder(wavFile, encKey).takeIf { it.start() }
+            }
+            wavRecorder = recorder
+            if (recorder == null) {
+                android.util.Log.w("MeetingViewModel", "实时音频存档启动失败")
+            } else {
+                meetingRepository.updateAudioFilePath(currentMeetingId, wavFile.absolutePath)
             }
 
             if (!connectAsr(language, engineTypeOverride)) return@launch
+
+            // 本地引擎才启用声纹识别（云端有服务端分离）；模型加载失败则降级为轮次递增
+            voiceprintEnabled = transcriptionUseCase.isLocalFunAsr() &&
+                withContext(Dispatchers.IO) { voiceprint.initialize(getApplication()) }
+            if (voiceprintEnabled) voiceprint.reset()
 
             _uiState.update { it.copy(
                 isMeetingActive = true,
@@ -202,10 +266,19 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /** 使用 TranscriptionUseCase → EngineRouter 智能路由启动 ASR */
+    private var asrConnecting = false
+
     private suspend fun connectAsr(
         language: String = "cn",
         engineTypeOverride: com.example.meetingtranscriber.engine.AsrEngineType? = null
     ): Boolean {
+        // 防止重复连接
+        if (asrConnecting || transcriptionUseCase.isRunning.value) {
+            android.util.Log.w("MeetingViewModel", "ASR 已在运行或连接中，跳过重复调用")
+            return false
+        }
+        asrConnecting = true
+        try {
         val vocab = db.vocabularyDao().getVocabularyForMeeting(currentMeetingId)
         val result = transcriptionUseCase.start(
             context = getApplication(),
@@ -224,7 +297,11 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         processedSentenceCount = 0
         speakerGapFrames = 0
         vadDetector.reset()
+        sileroVad?.reset()
         return true
+        } finally {
+            asrConnecting = false
+        }
     }
 
     /** 重试连接（网络恢复后手动触发） */
@@ -246,7 +323,14 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
             audioCaptureManager.stop()
             wavRecorder?.stop()
+            // 等待 SharedFlow 中残余帧被消费（~100ms 缓冲），
+            // 确保尾音进入 ASR stream 后再 finalize，避免最后一帧丢失
+            delay(150)
             wavRecorder = null
+            // 声纹判定最后一轮（需在引擎释放前取当前轮次 id）
+            if (voiceprintEnabled) {
+                transcriptionUseCase.flushSpeakerTurn()?.let { voiceprint.onTurnEnded(it) }
+            }
             transcriptionUseCase.stop()
 
             val meeting = meetingRepository.endMeeting(currentMeetingId)
@@ -259,6 +343,11 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 isConnected = false
             ) }
             stopTimer()
+
+            // 清空转写列表，避免二次进入时残留旧数据
+            _segments.value = emptyList()
+            processedSentenceCount = 0
+            speakerLabelMap.clear()
 
             if (meeting != null) {
                 generateSummary(meeting)
@@ -284,10 +373,73 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(errorMessage = null) }
     }
 
-    private fun appendSegment(speakerId: String, text: String, startMs: Long, endMs: Long, sentenceId: Long) {
+    /** 声纹尚未出结果时沿用的最近已识别身份（首轮兜底"会议人1"） */
+    private var lastIdentifiedLabel: String? = null
+    /** 语气词与标点（段落只含这些字符则视为静音幻觉，不入库） */
+    private val fillerChars = Regex("[嗯啊呃哦哎唉喔噢呀嘛哈哼呵\\s，。,.!！?？、~…]")
+
+    /**
+     * 声纹判定落地：更新标签映射，并把该轮已入库/在屏的段落统一修正。
+     * identified=null（人声不足/异常）→ 就近归属最近身份，兜底"会议人1"。
+     */
+    private fun onSpeakerIdentified(turnId: String, identified: String?) {
+        viewModelScope.launch {
+            val label = identified ?: (lastIdentifiedLabel ?: "会议人1")
+            lastIdentifiedLabel = label
+            speakerLabelMap[turnId] = label
+            // 该轮在屏/入库段落与判定不一致（就近沿用的标签判错）才修正；
+            // 一致时跳过 DB UPDATE + 全列表 copy（每轮全量修正是低端机卡顿源之一）
+            if (_segments.value.any { it.speakerId == turnId && it.displaySpeaker != label }) {
+                transcriptRepository.renameSpeaker(currentMeetingId, turnId, label)
+                _segments.update { list ->
+                    list.map { if (it.speakerId == turnId) it.copy(displaySpeaker = label) else it }
+                }
+            }
+            _uiState.update { it.copy(
+                speakerLabels = speakerLabelMap.toMap(),
+                speakerCount = speakerLabelMap.values.toSet().size
+            ) }
+            // 会议已结束后才到达的判定（最后一轮）→ 修正 meeting 行的 speakerCount
+            if (!_uiState.value.isMeetingActive && currentMeetingId != 0L) {
+                meetingRepository.updateSpeakerCount(currentMeetingId)
+            }
+        }
+    }
+
+    private fun appendSegment(
+        speakerId: String, text: String, startMs: Long, endMs: Long,
+        sentenceId: Long, isContinuation: Boolean = false
+    ) {
         val formattedText = TextFormatter.spokenNumberToDigits(TextFormatter.format(text))
-        val label = speakerLabelMap.getOrPut(speakerId) {
-            "会议人${speakerLabelMap.size + 1}"
+        // 纯语气词/标点段落不入库：多为静音期 ASR 幻觉（如连续"嗯"），无信息量
+        if (formattedText.replace(fillerChars, "").isBlank()) return
+
+        // 续段合并：本句是上一句被软/硬截断后的延续（同一说话人、句号连续）→
+        // 拼回上一条，屏幕/数据库/导出都保持完整一句
+        val last = _segments.value.lastOrNull()
+        if (isContinuation && last != null && last.speakerId == speakerId &&
+            lastAppendedSentenceId == sentenceId - 1
+        ) {
+            val merged = last.copy(text = last.text + formattedText, endTimeMs = endMs)
+            _segments.update { it.dropLast(1) + merged }
+            _uiState.update { it.copy(interimText = "") }
+            lastAppendedSentenceId = sentenceId
+            viewModelScope.launch {
+                // DB 行按首段 sentenceId 定位（merged 保留的就是它）
+                transcriptRepository.mergeContinuation(
+                    currentMeetingId, merged.sentenceId, merged.text, merged.endTimeMs)
+            }
+            return
+        }
+
+        val label = if (voiceprintEnabled) {
+            // 声纹模式：结果未到先沿用最近识别的身份（首轮兜底"会议人1"），
+            // 声纹判定后若不一致由 onSpeakerIdentified 统一修正——不再显示"识别中…"占位
+            speakerLabelMap[speakerId] ?: lastIdentifiedLabel ?: "会议人1"
+        } else {
+            speakerLabelMap.getOrPut(speakerId) {
+                "会议人${speakerLabelMap.size + 1}"
+            }
         }
         val segment = TranscriptSegment(
             meetingId = currentMeetingId,
@@ -299,11 +451,12 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             sentenceId = sentenceId
         )
         _segments.update { it + segment }
+        lastAppendedSentenceId = sentenceId
         pendingSegmentsForRecovery.add(segment)
         _uiState.update { it.copy(
             interimText = "",
             speakerLabels = speakerLabelMap.toMap(),
-            speakerCount = speakerLabelMap.size
+            speakerCount = speakerLabelMap.values.toSet().size
         ) }
         viewModelScope.launch {
             transcriptRepository.saveSegment(segment)
@@ -313,6 +466,13 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     private fun generateSummary(meeting: MeetingInfo) {
         viewModelScope.launch {
             try {
+                val segments = transcriptRepository.getSegmentsOnce(meeting.id)
+                // 无有效转写（如全部为静音幻觉被过滤）→ 不生成纪要，避免 LLM 对空文本编造内容
+                if (segments.isEmpty()) {
+                    android.util.Log.i("MeetingViewModel", "无转写内容，跳过纪要生成")
+                    return@launch
+                }
+
                 _uiState.update { it.copy(isGeneratingSummary = true, summaryProgress = 0f) }
 
                 // 收集摘要进度
@@ -322,7 +482,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
 
-                val segments = transcriptRepository.getSegmentsOnce(meeting.id)
                 val fullText = segments.joinToString("\n") {
                     "${it.displaySpeaker} [${it.formattedTime}]: ${it.text}"
                 }
@@ -337,12 +496,64 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 }
                 meetingRepository.saveSummary(meeting.id, summary)
 
+                // 导出 TXT 纪要文件
+                saveSummaryToFile(meeting, segments, summary)
+
                 progressJob.cancel()
                 _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 1f) }
             } catch (e: Exception) {
                 android.util.Log.w("MeetingViewModel", "纪要生成失败: ${e.message}")
                 _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 0f) }
             }
+        }
+    }
+
+    /** 将会议纪要导出为 TXT 文件到 summaries/ 目录 */
+    private fun saveSummaryToFile(
+        meeting: MeetingInfo,
+        segments: List<TranscriptSegment>,
+        summary: String
+    ) {
+        try {
+            val app = getApplication<MeetingApplication>()
+            val dir = java.io.File(app.getExternalFilesDir(null), "summaries")
+            dir.mkdirs()
+            val dateStr = java.text.SimpleDateFormat(
+                "yyyy-MM-dd_HHmm", java.util.Locale.getDefault()
+            ).format(java.util.Date(meeting.startTime))
+            val safeTitle = meeting.title.replace(Regex("[/\\\\:*?\"<>|]"), "_")
+            val file = java.io.File(dir, "${safeTitle}_${dateStr}_纪要.txt")
+            val content = buildString {
+                appendLine("=".repeat(50))
+                appendLine("会议纪要")
+                appendLine("=".repeat(50))
+                appendLine()
+                appendLine("标题: ${meeting.title}")
+                appendLine("时间: ${meeting.formattedStartTime}")
+                appendLine("时长: ${meeting.formattedDuration}")
+                appendLine("发言人: ${meeting.speakerCount} 人")
+                appendLine("转写条数: ${meeting.segmentCount} 条")
+                appendLine("引擎: ASR=${meeting.asrEngineType ?: "-"} | LLM=${meeting.llmEngineType ?: "-"}")
+                appendLine()
+                appendLine("-".repeat(50))
+                appendLine("转写内容")
+                appendLine("-".repeat(50))
+                appendLine()
+                segments.forEach { seg ->
+                    appendLine("${seg.displaySpeaker} [${seg.formattedTime}]")
+                    appendLine(seg.text)
+                    appendLine()
+                }
+                appendLine("-".repeat(50))
+                appendLine("AI 摘要")
+                appendLine("-".repeat(50))
+                appendLine()
+                appendLine(summary)
+            }
+            file.writeText(content, Charsets.UTF_8)
+            android.util.Log.i("MeetingViewModel", "纪要已导出: ${file.absolutePath}")
+        } catch (e: Exception) {
+            android.util.Log.w("MeetingViewModel", "纪要文件导出失败: ${e.message}")
         }
     }
 
@@ -389,6 +600,8 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             wavRecorder?.cancel()
             wavRecorder = null
         }
+        voiceprint.release()
+        sileroVad?.release()
         stopTimer()
     }
 
@@ -410,19 +623,25 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun saveRecoveryState() {
         try {
-            val state = RecoveryStateEntity(
-                meetingId = currentMeetingId,
-                title = currentMeetingTitle,
-                startTime = meetingStartTime,
-                isOfflineMode = false,
-                isDemoMode = false,
-                currentTaskId = "",  // TranscriptionUseCase 已封装引擎细节
-                audioBufferFilePath = null,
-                audioBufferFrameCount = 0,
-                speakerLabelMapJson = Gson().toJson(speakerLabelMap.toMap()),
-                pendingSegmentsJson = Gson().toJson(pendingSegmentsForRecovery.toList())
-            )
-            recoveryStateDao.upsert(state)
+            val isOffline = transcriptionUseCase.currentEngine.value?.isCloud == false
+            // 调用方线程只做集合快照，序列化 + 落库移到后台（每 5s 一次，避免周期掉帧）
+            val labelSnapshot = speakerLabelMap.toMap()
+            val pendingSnapshot = pendingSegmentsForRecovery.toList()
+            withContext(Dispatchers.Default) {
+                val state = RecoveryStateEntity(
+                    meetingId = currentMeetingId,
+                    title = currentMeetingTitle,
+                    startTime = meetingStartTime,
+                    isOfflineMode = isOffline,
+                    isDemoMode = false,
+                    currentTaskId = "",  // TranscriptionUseCase 已封装引擎细节
+                    audioBufferFilePath = null,
+                    audioBufferFrameCount = 0,
+                    speakerLabelMapJson = gson.toJson(labelSnapshot),
+                    pendingSegmentsJson = gson.toJson(pendingSnapshot)
+                )
+                recoveryStateDao.upsert(state)
+            }
             pendingSegmentsForRecovery.clear()
         } catch (e: Exception) {
             android.util.Log.w("MeetingViewModel", "保存恢复状态失败: ${e.message}")
@@ -447,7 +666,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 isMeetingActive = true,
                 isPaused = false,
                 speakerLabels = speakerLabelMap.toMap(),
-                speakerCount = speakerLabelMap.size
+                speakerCount = speakerLabelMap.values.toSet().size
             ) }
 
             pendingSegments.forEach { transcriptRepository.saveSegment(it) }

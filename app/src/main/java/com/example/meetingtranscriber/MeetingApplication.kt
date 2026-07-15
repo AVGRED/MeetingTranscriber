@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.util.Log
+import com.example.meetingtranscriber.audio.AudioCacheManager
 import com.example.meetingtranscriber.data.db.AppDatabase
 import com.example.meetingtranscriber.data.db.RecoveryStateEntity
 import com.example.meetingtranscriber.engine.EngineRouter
@@ -12,10 +13,10 @@ import com.example.meetingtranscriber.engine.llm.*
 import com.example.meetingtranscriber.network.UpdateChecker
 import com.example.meetingtranscriber.security.CryptoManager
 import com.example.meetingtranscriber.util.StorageMonitor
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 class MeetingApplication : Application() {
 
@@ -24,15 +25,19 @@ class MeetingApplication : Application() {
         lateinit var instance: MeetingApplication
             private set
         var pendingRecoveryState: RecoveryStateEntity? = null
+        /** 恢复状态检查完成信号（检查已移后台，MainActivity 等它完成再读结果） */
+        val recoveryCheckDone = CompletableDeferred<Unit>()
     }
+
+    /** 本地 ASR 引擎（模型常驻，跨会议复用；启动时后台预加载） */
+    private val funAsrLocal by lazy { FunAsrEngine(this) }
 
     /** 引擎路由器（懒加载单例） */
     val engineRouter: EngineRouter by lazy {
         val prefs = PreferencesManager(this)
-        val funAsrEngine = FunAsrEngine(this)
         EngineRouter(
             prefs = prefs,
-            funAsrEngine = funAsrEngine,
+            funAsrEngine = funAsrLocal,
             funAsrCloudEngine = FunAsrCloudEngine(prefs),
             tingwuEngine = TingwuEngine(prefs),
             volcengineEngine = VolcengineEngine(prefs),
@@ -47,11 +52,19 @@ class MeetingApplication : Application() {
         instance = this
         CryptoManager.init(this)
         createNotificationChannels()
-        checkRecoveryState()
-        cleanupExpiredRecordings()
-        StorageMonitor.maybeNotify(this)
 
+        // 启动重活全部移出主线程：SQLCipher 打开/迁移 + 文件清理是低端机冷启动白屏元凶
         CoroutineScope(Dispatchers.IO).launch {
+            checkRecoveryState()
+            recoveryCheckDone.complete(Unit)
+            // 默认本地引擎时预加载 ASR 模型（226MB 需 3-4s）：首次开会免等
+            if (PreferencesManager(this@MeetingApplication).preferredAsrEngine ==
+                com.example.meetingtranscriber.engine.AsrEngineType.FUNASR_LOCAL) {
+                funAsrLocal.initialize(this@MeetingApplication)
+            }
+            cleanupExpiredRecordings()
+            AudioCacheManager.cleanup(this@MeetingApplication)
+            StorageMonitor.maybeNotify(this@MeetingApplication)
             val info = UpdateChecker.check(this@MeetingApplication)
             if (info != null) {
                 UpdateChecker.maybeNotify(this@MeetingApplication, info)
@@ -72,19 +85,17 @@ class MeetingApplication : Application() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun checkRecoveryState() {
+    private suspend fun checkRecoveryState() {
         try {
             val db = AppDatabase.getInstance(this)
-            val state = runBlocking {
-                db.recoveryStateDao().getLatest()
-            }
+            val state = db.recoveryStateDao().getLatest()
             if (state != null) {
                 val ageMs = System.currentTimeMillis() - state.lastSavedAt
                 if (ageMs < 24 * 3600 * 1000L) {
                     pendingRecoveryState = state
                     Log.i("MeetingApplication", "发现待恢复的会议: ${state.title}")
                 } else {
-                    runBlocking { db.recoveryStateDao().deleteAll() }
+                    db.recoveryStateDao().deleteAll()
                     Log.i("MeetingApplication", "恢复状态已过期，已清除")
                 }
             }

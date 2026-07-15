@@ -14,7 +14,8 @@ import com.example.meetingtranscriber.databinding.ItemMeetingHistoryBinding
 class HistoryAdapter(
     private val onItemClick: (MeetingInfo) -> Unit,
     private val onDeleteClick: (MeetingInfo) -> Unit,
-    private val onRestoreClick: ((MeetingInfo) -> Unit)? = null
+    private val onRestoreClick: ((MeetingInfo) -> Unit)? = null,
+    private val onExportClick: ((MeetingInfo) -> Unit)? = null
 ) : ListAdapter<MeetingInfo, HistoryAdapter.ViewHolder>(DiffCallback) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -44,17 +45,20 @@ class HistoryAdapter(
                 binding.tvTag.visibility = View.GONE
             }
 
-            if (meeting.isOngoing) {
-                binding.ivStatus.background?.setTint(
-                    ContextCompat.getColor(binding.root.context, R.color.status_recording)
-                )
-            } else {
-                binding.ivStatus.background?.setTint(
-                    ContextCompat.getColor(binding.root.context, R.color.interim_text)
-                )
-            }
+            // 状态点统一灰色（绿色"进行中"样式已按需求移除）
+            binding.ivStatus.background?.setTint(
+                ContextCompat.getColor(binding.root.context, R.color.interim_text)
+            )
 
             binding.root.setOnClickListener { onItemClick(meeting) }
+
+            // 导出按钮：进行中的会议不显示
+            if (meeting.isOngoing) {
+                binding.btnExport.visibility = View.GONE
+            } else {
+                binding.btnExport.visibility = View.VISIBLE
+                binding.btnExport.setOnClickListener { onExportClick?.invoke(meeting) }
+            }
 
             if (meeting.isArchived) {
                 binding.btnDelete.contentDescription = "永久删除"

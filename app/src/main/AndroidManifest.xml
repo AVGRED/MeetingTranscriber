@@ -18,6 +18,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 防止休眠 (会议中) -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 相册页读取照片（本应用自己拍的无需权限；重装后读旧照片才用到） -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 

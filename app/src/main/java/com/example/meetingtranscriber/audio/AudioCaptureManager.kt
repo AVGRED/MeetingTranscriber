@@ -33,10 +33,11 @@ class AudioCaptureManager {
     private val isCapturing = AtomicBoolean(false)
     private var captureJob: Job? = null
 
-    /** 音频数据流，每秒 10 帧 */
+    /** 音频数据流，每秒 10 帧。缓冲 64 帧(6.4s)：下游偶发阻塞（decode/IO 抖动）
+     *  时不丢帧——丢帧不只断转写，连录音存档都会缺失 */
     private val _audioStream = MutableSharedFlow<ByteArray>(
         replay = 0,
-        extraBufferCapacity = 10,
+        extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val audioStream: SharedFlow<ByteArray> = _audioStream

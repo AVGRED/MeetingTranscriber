@@ -5,7 +5,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.meetingtranscriber.data.db.AppDatabase
 import com.example.meetingtranscriber.data.model.MeetingInfo
+import com.example.meetingtranscriber.data.model.TranscriptSegment
 import com.example.meetingtranscriber.data.repository.MeetingRepository
+import com.example.meetingtranscriber.data.repository.TranscriptRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -14,6 +16,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
     private val db = AppDatabase.getInstance(application)
     private val meetingRepository = MeetingRepository(db)
+    private val transcriptRepository = TranscriptRepository(db)
 
     private val _refreshTrigger = MutableStateFlow(0)
     private val _showArchived = MutableStateFlow(false)
@@ -34,9 +37,11 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         val flow = when {
             archived -> meetingRepository.getArchivedMeetings()
             tag != null -> meetingRepository.getMeetingsByTag(tag)
+            query.isNotBlank() -> meetingRepository.searchMeetings(query)  // 下推 SQL
             else -> meetingRepository.getAllMeetings()
         }
-        if (query.isNotBlank()) {
+        // 归档/标签视图下搜索仍走内存过滤（组合少见，保持原行为）
+        if (query.isNotBlank() && (archived || tag != null)) {
             flow.map { meetings -> meetings.filter { it.title.contains(query, ignoreCase = true) } }
         } else {
             flow
@@ -77,5 +82,12 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             meetingRepository.permanentDelete(id)
         }
+    }
+
+    /** 加载会议 + 转写片段（用于导出） */
+    suspend fun loadForExport(meetingId: Long): Pair<MeetingInfo?, List<TranscriptSegment>> {
+        val meeting = meetingRepository.getMeeting(meetingId)
+        val segments = transcriptRepository.getSegmentsOnce(meetingId)
+        return meeting to segments
     }
 }

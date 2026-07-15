@@ -15,11 +15,14 @@ import androidx.recyclerview.widget.LinearLayoutManager
 
 import com.example.meetingtranscriber.R
 import com.example.meetingtranscriber.ui.detail.DetailFragment
-import com.example.meetingtranscriber.ui.meeting.MeetingFragment
+import com.example.meetingtranscriber.ui.export.ExportHelper
+import com.example.meetingtranscriber.ui.export.QrShareDialog
 import com.example.meetingtranscriber.databinding.FragmentHistoryBinding
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class HistoryFragment : Fragment() {
 
@@ -66,7 +69,8 @@ class HistoryFragment : Fragment() {
             onRestoreClick = { meeting ->
                 viewModel.restoreMeeting(meeting.id)
                 Toast.makeText(requireContext(), "已恢复", Toast.LENGTH_SHORT).show()
-            }
+            },
+            onExportClick = { meeting -> showExportDialog(meeting) }
         )
 
         binding.rvHistory.adapter = adapter
@@ -127,6 +131,51 @@ class HistoryFragment : Fragment() {
             }
             binding.chipGroupTags.addView(chip)
         }
+    }
+
+    private fun showExportDialog(meeting: com.example.meetingtranscriber.data.model.MeetingInfo) {
+        val formats = arrayOf("TXT 文本", "Word 文档", "PDF 文件", "扫码下载（文档+录音）")
+        val mimeTypes = arrayOf("text/plain", "application/msword", "application/pdf")
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("导出「${meeting.title}」")
+            .setItems(formats) { _, which ->
+                viewLifecycleOwner.lifecycleScope.launch {
+                    val (m, segments) = viewModel.loadForExport(meeting.id)
+                    val mInfo = m ?: return@launch
+                    if (segments.isEmpty()) {
+                        Toast.makeText(requireContext(), "暂无转写内容", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    if (which == 3) {
+                        QrShareDialog.show(this@HistoryFragment, mInfo, segments)
+                        return@launch
+                    }
+                    // 文件生成移到 IO：长会议主线程画 PDF/拼文本会冻结数秒
+                    val file = withContext(Dispatchers.IO) {
+                        when (which) {
+                            0 -> ExportHelper.exportTxt(requireContext(), mInfo, segments)
+                            1 -> ExportHelper.exportWord(requireContext(), mInfo, segments)
+                            2 -> ExportHelper.exportPdf(requireContext(), mInfo, segments)
+                            else -> null
+                        }
+                    }
+                    if (file != null) {
+                        AlertDialog.Builder(requireContext())
+                            .setTitle("导出成功")
+                            .setMessage("已保存到:\n${file.absolutePath}")
+                            .setPositiveButton("分享") { _, _ ->
+                                ExportHelper.shareFile(requireContext(), file, mimeTypes[which])
+                            }
+                            .setNegativeButton("关闭", null)
+                            .show()
+                    } else {
+                        Toast.makeText(requireContext(), "导出失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     override fun onDestroyView() {

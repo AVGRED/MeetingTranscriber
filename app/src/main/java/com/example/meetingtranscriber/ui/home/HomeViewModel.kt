@@ -75,8 +75,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _meetingCount = MutableStateFlow(0)
     val meetingCount: StateFlow<Int> = _meetingCount
 
-    private val _totalMinutes = MutableStateFlow(0L)
-    val totalMinutes: StateFlow<Long> = _totalMinutes
+    private val _recordingCount = MutableStateFlow(0)
+    val recordingCount: StateFlow<Int> = _recordingCount
+
+    /** 卡片小字：无录音时长时仅"条录音"，否则附加现存录音总时长 */
+    private val _recordingLabel = MutableStateFlow("条录音")
+    val recordingLabel: StateFlow<String> = _recordingLabel
 
     private val _freeStorageGB = MutableStateFlow("--")
     val freeStorageGB: StateFlow<String> = _freeStorageGB
@@ -115,7 +119,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val meetings = repo.getAllMeetingsOnce()
             _meetingCount.value = meetings.size
-            _totalMinutes.value = meetings.sumOf { it.durationSeconds.toLong() } / 60
+            // 条录音 = 录音文件仍存在的会议数（30 天清理后不再计入，与实际可播放的录音对齐）
+            val withRecording = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                meetings.filter { m ->
+                    !m.audioFilePath.isNullOrBlank() && java.io.File(m.audioFilePath).exists()
+                }
+            }
+            _recordingCount.value = withRecording.size
+            val totalSeconds = withRecording.sumOf { it.durationSeconds.toLong() }
+            _recordingLabel.value = when {
+                totalSeconds <= 0 -> "条录音"
+                totalSeconds >= 2 * 3600 -> "条录音·" + String.format("%.1f", totalSeconds / 3600.0) + "小时"
+                else -> "条录音·${(totalSeconds + 59) / 60}分钟"
+            }
 
             // 存储空间
             try {

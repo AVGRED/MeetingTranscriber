@@ -1,5 +1,6 @@
 package com.example.meetingtranscriber.ui.apiconfig
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -7,11 +8,9 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
-import com.example.meetingtranscriber.R
 import com.example.meetingtranscriber.databinding.FragmentApiConfigBinding
 import com.example.meetingtranscriber.engine.AsrEngineType
 import com.example.meetingtranscriber.engine.LlmEngineType
-import com.google.android.material.chip.Chip
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import androidx.lifecycle.lifecycleScope
@@ -31,43 +30,24 @@ class ApiConfigFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        setupAsrChips()
-        setupLlmChips()
+        setupAsrDropdown()
+        setupLlmDropdown()
         setupClickListeners()
         observeState()
         loadInitialValues()
     }
 
     // ═══════════════════════════════════════════════════════════
-    // ASR Chip 设置
+    // ASR 下拉菜单设置
     // ═══════════════════════════════════════════════════════════
 
-    private fun setupAsrChips() {
-        AsrEngineType.entries.forEach { type ->
-            // 本地引擎 (sherpa-onnx) 部分设备不兼容，暂时隐藏
-            if (type == AsrEngineType.FUNASR_LOCAL) return@forEach
-            val chip = Chip(requireContext()).apply {
-                id = when (type) {
-                    AsrEngineType.FUNASR_CLOUD -> R.id.chip_asr_funasr_cloud
-                    AsrEngineType.TINGWU_CLOUD -> R.id.chip_asr_tingwu
-                    AsrEngineType.VOLCENGINE_CLOUD -> R.id.chip_asr_volcengine
-                    AsrEngineType.FUNASR_LOCAL -> R.id.chip_asr_funasr_local  // unreachable
-                }
-                text = type.displayName
-                isCheckable = true
-            }
-            binding.chipGroupAsr.addView(chip)
-        }
-
-        binding.chipGroupAsr.setOnCheckedStateChangeListener { group, _ ->
-            val checkedId = group.checkedChipId
-            val engineType = when (checkedId) {
-                R.id.chip_asr_funasr_cloud -> AsrEngineType.FUNASR_CLOUD
-                R.id.chip_asr_tingwu -> AsrEngineType.TINGWU_CLOUD
-                R.id.chip_asr_volcengine -> AsrEngineType.VOLCENGINE_CLOUD
-                R.id.chip_asr_funasr_local -> AsrEngineType.FUNASR_LOCAL
-                else -> return@setOnCheckedStateChangeListener
-            }
+    private fun setupAsrDropdown() {
+        val items = AsrEngineType.entries.map { it.displayName }.toTypedArray()
+        binding.dropdownAsr.setSimpleItems(items)
+        // Material 下拉已知 bug：选中后 adapter 被过滤只剩当前项，重开前重置完整列表
+        binding.dropdownAsr.setOnClickListener { binding.dropdownAsr.setSimpleItems(items) }
+        binding.dropdownAsr.setOnItemClickListener { _, _, position, _ ->
+            val engineType = AsrEngineType.entries[position]
             viewModel.setPreferredAsrEngine(engineType)
             updateAsrCardVisibility(engineType)
         }
@@ -80,31 +60,16 @@ class ApiConfigFragment : Fragment() {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // LLM Chip 设置
+    // LLM 下拉菜单设置
     // ═══════════════════════════════════════════════════════════
 
-    private fun setupLlmChips() {
-        LlmEngineType.entries.forEach { type ->
-            val chip = Chip(requireContext()).apply {
-                id = when (type) {
-                    LlmEngineType.QWEN_LOCAL -> R.id.chip_llm_qwen
-                    LlmEngineType.DOUBAO_CLOUD -> R.id.chip_llm_doubao
-                    LlmEngineType.DASHSCOPE_CLOUD -> R.id.chip_llm_dashscope
-                }
-                text = type.displayName
-                isCheckable = true
-            }
-            binding.chipGroupLlm.addView(chip)
-        }
-
-        binding.chipGroupLlm.setOnCheckedStateChangeListener { group, _ ->
-            val checkedId = group.checkedChipId
-            val engineType = when (checkedId) {
-                R.id.chip_llm_qwen -> LlmEngineType.QWEN_LOCAL
-                R.id.chip_llm_doubao -> LlmEngineType.DOUBAO_CLOUD
-                R.id.chip_llm_dashscope -> LlmEngineType.DASHSCOPE_CLOUD
-                else -> return@setOnCheckedStateChangeListener
-            }
+    private fun setupLlmDropdown() {
+        val items = LlmEngineType.entries.map { it.displayName }.toTypedArray()
+        binding.dropdownLlm.setSimpleItems(items)
+        // 同 ASR 下拉：重开前重置完整列表，避免被过滤只剩当前项
+        binding.dropdownLlm.setOnClickListener { binding.dropdownLlm.setSimpleItems(items) }
+        binding.dropdownLlm.setOnItemClickListener { _, _, position, _ ->
+            val engineType = LlmEngineType.entries[position]
             viewModel.setPreferredLlmEngine(engineType)
             updateLlmCardVisibility(engineType)
         }
@@ -181,6 +146,9 @@ class ApiConfigFragment : Fragment() {
         binding.switchAutoFallback.setOnCheckedChangeListener { _, isChecked ->
             viewModel.setAutoFallback(isChecked)
         }
+
+        // API 接入说明
+        binding.btnApiGuide.setOnClickListener { showApiGuide() }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -190,24 +158,17 @@ class ApiConfigFragment : Fragment() {
     private fun observeState() {
         // ASR preference
         viewModel.preferredAsrEngine.collectLatestIn(lifecycleScope) { type ->
-            val chipId = when (type) {
-                AsrEngineType.FUNASR_CLOUD -> R.id.chip_asr_funasr_cloud
-                AsrEngineType.TINGWU_CLOUD -> R.id.chip_asr_tingwu
-                AsrEngineType.VOLCENGINE_CLOUD -> R.id.chip_asr_volcengine
-                AsrEngineType.FUNASR_LOCAL -> R.id.chip_asr_funasr_local
+            if (binding.dropdownAsr.text?.toString() != type.displayName) {
+                binding.dropdownAsr.setText(type.displayName, false)
             }
-            binding.chipGroupAsr.check(chipId)
             updateAsrCardVisibility(type)
         }
 
         // LLM preference
         viewModel.preferredLlmEngine.collectLatestIn(lifecycleScope) { type ->
-            val chipId = when (type) {
-                LlmEngineType.QWEN_LOCAL -> R.id.chip_llm_qwen
-                LlmEngineType.DOUBAO_CLOUD -> R.id.chip_llm_doubao
-                LlmEngineType.DASHSCOPE_CLOUD -> R.id.chip_llm_dashscope
+            if (binding.dropdownLlm.text?.toString() != type.displayName) {
+                binding.dropdownLlm.setText(type.displayName, false)
             }
-            binding.chipGroupLlm.check(chipId)
             updateLlmCardVisibility(type)
         }
 
@@ -236,6 +197,74 @@ class ApiConfigFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // API 接入说明
+    // ═══════════════════════════════════════════════════════════
+
+    private fun showApiGuide() {
+        val message = """
+            【FunASR 云端】— WebSocket 地址
+
+            自部署 FunASR 服务端后获得，例如：
+            ws://your-server:10095
+            或 wss://your-domain.com/ws
+
+            部署指南：https://github.com/modelscope/FunASR
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【通义听悟】— 阿里云实时语音识别
+
+            ① 登录阿里云控制台：
+            https://ram.console.aliyun.com/manage/ak
+            创建 AccessKey → 获取 AccessKey ID + Secret
+
+            ② 开通智能语音交互服务：
+            https://nls-portal.console.aliyun.com
+            创建项目 → 获取 App Key
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【豆包 ASR】— 火山引擎语音识别
+
+            ① 登录火山引擎控制台：
+            https://console.volcengine.com/iam/keymanage
+            创建 Access Key → 获取 API Key
+
+            ② 开通语音识别服务获取 Access Token：
+            https://console.volcengine.com/speech/service/0
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【豆包 LLM】— 火山方舟大模型
+
+            ① 登录火山方舟控制台：
+            https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey
+            创建 API Key
+
+            ② 创建推理端点（Endpoint）：
+            https://console.volcengine.com/ark/region:ark+cn-beijing/endpoint
+            选择模型 → 创建端点 → 获取端点 ID
+
+            ━━━━━━━━━━━━━━━━━━━━━━
+
+            【DashScope】— 阿里云灵积（通义千问）
+
+            ① 登录 DashScope 控制台：
+            https://dashscope.console.aliyun.com/apiKey
+            创建 API Key
+
+            ② 注意：RAM AccessKey 不适用于 DashScope，
+            必须使用 DashScope 专属 API Key。
+        """.trimIndent()
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("📖 API 接入说明")
+            .setMessage(message)
+            .setPositiveButton("知道了", null)
+            .show()
     }
 }
 

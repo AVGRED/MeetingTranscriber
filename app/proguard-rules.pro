@@ -20,8 +20,8 @@
 -keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
 
 # SQLCipher
--keep class net.sqlcipher.** { * }
--keep class net.sqlcipher.database.** { * }
+-keep class net.sqlcipher.** { *; }
+-keep class net.sqlcipher.database.** { *; }
 
 # sherpa-onnx JNI (ASR engine — JNI name resolution depends on exact class/method names)
 -dontwarn com.k2fsa.sherpa.onnx.**

@@ -85,7 +85,7 @@ class EngineRouter(
                 funAsrEngine
             }
 
-            // ── FunASR 云端（默认） ──
+            // ── FunASR 云端 ──
             preferred == AsrEngineType.FUNASR_CLOUD -> {
                 if (prefs.hasFunAsrCloudUrl() && funAsrCloudEngine != null) {
                     ensureInitializedOrThrow(context, funAsrCloudEngine!!)
@@ -98,6 +98,10 @@ class EngineRouter(
                     Log.w(TAG, "FunASR 云端地址未配置 → 降级到豆包 ASR")
                     ensureInitializedOrThrow(context, volcengineEngine!!)
                     volcengineEngine!!
+                } else if (prefs.autoFallback) {
+                    Log.w(TAG, "无可用云端引擎 → 降级到本地 FunASR")
+                    ensureInitializedOrThrow(context, funAsrEngine)
+                    funAsrEngine
                 } else {
                     throw NoEngineException(
                         "FunASR 云端地址未配置。请在「API 配置」页面设置 WebSocket URL，" +
@@ -114,6 +118,10 @@ class EngineRouter(
                     Log.w(TAG, "通义听悟 Key 未配置 → 降级到 FunASR 云端")
                     ensureInitializedOrThrow(context, funAsrCloudEngine!!)
                     funAsrCloudEngine!!
+                } else if (prefs.autoFallback) {
+                    Log.w(TAG, "无可用云端引擎 → 降级到本地 FunASR")
+                    ensureInitializedOrThrow(context, funAsrEngine)
+                    funAsrEngine
                 } else {
                     throw NoEngineException(
                         "通义听悟密钥未配置。请在「API 配置」页面设置 AccessKey ID/Secret/AppKey。")
@@ -129,6 +137,10 @@ class EngineRouter(
                     Log.w(TAG, "豆包 ASR Key 未配置 → 降级到 FunASR 云端")
                     ensureInitializedOrThrow(context, funAsrCloudEngine!!)
                     funAsrCloudEngine!!
+                } else if (prefs.autoFallback) {
+                    Log.w(TAG, "无可用云端引擎 → 降级到本地 FunASR")
+                    ensureInitializedOrThrow(context, funAsrEngine)
+                    funAsrEngine
                 } else {
                     throw NoEngineException(
                         "豆包 ASR 密钥未配置。请在「API 配置」页面设置 API Key 或 Access Token。")

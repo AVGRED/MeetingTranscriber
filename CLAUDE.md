@@ -66,6 +66,7 @@ Room v8，SQLCipher 加密。明文→加密自动迁移。
 - `llama.cpp` 是嵌套 git 仓库，已 gitignore，需手动 clone
 - `MeetingSummaryGenerator` 已弃用但被 ViewModel 作为 fallback 引用，暂不能删
 - 模型文件 (`*.onnx`, `*.gguf`) 不提交 git
+- `assets/models/` 需手动放置：ASR（`sense-voice-small-cn.onnx` + `tokens.txt`）、声纹（`3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx`，26MB，从 sherpa-onnx releases `speaker-recongition-models` 下载）、VAD（`silero_vad.onnx`，0.6MB，从 sherpa-onnx releases `asr-models` 下载）
 - `gradle-local.properties` 不提交 git
 - NDK 仅编译 `arm64-v8a`
 

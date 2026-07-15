@@ -49,9 +49,11 @@ class TranscriptAdapter(
     }
 
     fun setInterimText(text: String?) {
+        val newText = if (text.isNullOrBlank()) null else text
+        if (newText == interimText) return  // 文本未变（如计时器 tick 触发）不重绑
         val hadInterim = interimText != null
-        val hasInterim = !text.isNullOrBlank()
-        interimText = if (hasInterim) text else null
+        val hasInterim = newText != null
+        interimText = newText
 
         when {
             !hadInterim && hasInterim -> notifyItemInserted(itemCount)
@@ -68,14 +70,20 @@ class TranscriptAdapter(
 
     private fun buildAdapterItems(segments: List<TranscriptSegment>): List<AdapterItem> {
         if (segments.isEmpty()) return emptyList()
-        val sorted = segments.sortedBy { it.startTimeMs }
-        val result = mutableListOf<AdapterItem>()
+        // 实时 append 与 DB ORDER BY 两个来源本就有序：先 O(n) 检查，避免每句全量排序
+        var isSorted = true
+        for (i in 1 until segments.size) {
+            if (segments[i].startTimeMs < segments[i - 1].startTimeMs) { isSorted = false; break }
+        }
+        val sorted = if (isSorted) segments else segments.sortedBy { it.startTimeMs }
+        // 各话题段数一次算好，避免每遇新话题全列表 count（O(话题数×N)）
+        val topicCounts = sorted.groupingBy { it.topicId }.eachCount()
+        val result = ArrayList<AdapterItem>(sorted.size + topicCounts.size)
         var currentTopic = -1
         for (seg in sorted) {
             if (seg.topicId != 0 && seg.topicId != currentTopic) {
                 currentTopic = seg.topicId
-                val count = sorted.count { it.topicId == currentTopic }
-                result.add(AdapterItem.TopicHeader(currentTopic, count))
+                result.add(AdapterItem.TopicHeader(currentTopic, topicCounts[currentTopic] ?: 0))
             }
             result.add(AdapterItem.SegmentItem(seg))
         }

@@ -119,6 +119,7 @@ class WavRecorder(
                 it.close()
             }
             raf = null
+            Log.i(TAG, "录音结束 totalBytes=$totalBytes (${totalBytes / 32}ms)")  // 与会议时长比对可算缺帧率
             totalBytes
         } catch (e: Exception) {
             Log.e(TAG, "关闭录音文件失败: ${e.message}")

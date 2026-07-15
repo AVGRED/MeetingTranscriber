@@ -95,15 +95,18 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
             val all = transcriptRepository.getSegmentsOnce(meetingId.value)
             if (all.isEmpty()) return@launch
 
-            formatBackup = all
-                .map { it.id to it.text }
-                .filter { (_, text) -> TextFormatter.spokenNumberToDigits(TextFormatter.format(text)) != text }
-
+            val backup = mutableListOf<Pair<Long, String>>()
+            val updates = mutableListOf<Pair<Long, String>>()
             for (seg in all) {
                 val formatted = TextFormatter.spokenNumberToDigits(TextFormatter.format(seg.text))
                 if (formatted != seg.text) {
-                    transcriptRepository.updateText(seg.id, formatted)
+                    backup.add(seg.id to seg.text)
+                    updates.add(seg.id to formatted)
                 }
+            }
+            formatBackup = backup
+            if (updates.isNotEmpty()) {
+                transcriptRepository.updateTexts(updates)  // 单事务，Flow 只重发一次
             }
             loadMeeting(meetingId.value)
         }
@@ -112,8 +115,8 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
     fun undoFormat() {
         viewModelScope.launch {
             formatBackup?.let { backup ->
-                for ((id, original) in backup) {
-                    transcriptRepository.updateText(id, original)
+                if (backup.isNotEmpty()) {
+                    transcriptRepository.updateTexts(backup)
                 }
                 formatBackup = null
                 loadMeeting(meetingId.value)
@@ -129,6 +132,10 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
     fun saveSummary(text: String) {
         viewModelScope.launch {
             meetingRepository.saveSummary(meetingId.value, text)
+            // 首次手动撰写的纪要即为原始纪要
+            if (_originalSummary.value == null && text.isNotBlank()) {
+                _originalSummary.value = text
+            }
             _isSummaryEdited.value = false
         }
     }
@@ -137,6 +144,8 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
         val m = meeting.value ?: return
         viewModelScope.launch {
             val allSegments = transcriptRepository.getSegmentsOnce(m.id)
+            // 无转写内容不生成：避免 LLM 对空文本编造纪要（Fragment 层已有空提示）
+            if (allSegments.isEmpty()) return@launch
             val fullText = allSegments.joinToString("\n") {
                 "${it.displaySpeaker} [${it.formattedTime}]: ${it.text}"
             }

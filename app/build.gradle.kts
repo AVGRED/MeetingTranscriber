@@ -130,6 +130,10 @@ dependencies {
     // --- 协程 ---
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // --- 局域网分享 ---
+    implementation("com.google.zxing:core:3.5.3")      // 二维码位图生成（纯 Java，无需相机）
+    implementation("org.nanohttpd:nanohttpd:2.3.1")    // 局域网 HTTP 服务
+
     // --- 测试 ---
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

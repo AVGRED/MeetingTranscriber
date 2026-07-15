@@ -55,9 +55,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 检查崩溃恢复
-        MeetingApplication.pendingRecoveryState?.let { state ->
-            showRecoveryDialog(state)
+        // 检查崩溃恢复（检查在后台线程做，等完成信号再读结果；晚几百 ms 无感）
+        lifecycleScope.launch {
+            MeetingApplication.recoveryCheckDone.await()
+            MeetingApplication.pendingRecoveryState?.let { state ->
+                showRecoveryDialog(state)
+            }
         }
     }
 
@@ -88,6 +91,14 @@ class MainActivity : AppCompatActivity() {
                 .addToBackStack(null)
                 .commit()
         }
+    }
+
+    /** 打开 App 内相册页 */
+    fun navigateToAlbum() {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, com.example.meetingtranscriber.ui.album.AlbumFragment(), "album")
+            .addToBackStack(null)
+            .commit()
     }
 
     private fun showRecoveryDialog(state: RecoveryStateEntity) {

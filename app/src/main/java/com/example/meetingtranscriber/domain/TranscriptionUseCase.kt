@@ -174,13 +174,15 @@ class TranscriptionUseCase(
      * @return 完整句子列表（可能为空）
      */
     suspend fun stop(): List<AsrSentence> = withContext(Dispatchers.IO) {
-        _isRunning.value = false
-
+        // 先 finalize 冲刷残余流，再关闭 _isRunning 门
+        // 否则 SharedFlow 中未消费的帧会被 processAudio() 拒绝，丢失 ~100-200ms 尾音
         try {
             engine?.finalize()
         } catch (e: Exception) {
             Log.e(TAG, "finalize 异常", e)
         }
+
+        _isRunning.value = false
 
         // 等待最后的结果 flush
         delay(300)
@@ -209,12 +211,25 @@ class TranscriptionUseCase(
     }
 
     /**
-     * 切换说话人 — 通知引擎当前语音段结束，下个语音段是另一个说话人。
-     * 由 VAD 长时沉默检测触发。
+     * 切换说话人 — 通知引擎 decode 当前 utterance 并为下一说话人创建新 stream。
+     * 由 VAD 沉默检测触发。返回结束轮次的 speakerId（不足 1s 跳过或云端引擎 → null）。
      */
-    fun switchSpeaker() {
-        (engine as? com.example.meetingtranscriber.engine.asr.FunAsrEngine)?.startNewSpeakerTurn()
+    fun switchSpeaker(): String? {
+        return (engine as? com.example.meetingtranscriber.engine.asr.FunAsrEngine)?.startNewSpeakerTurn()
     }
+
+    /** 当前是否路由到本地 FunASR 引擎（声纹识别仅本地引擎启用） */
+    fun isLocalFunAsr(): Boolean =
+        engine is com.example.meetingtranscriber.engine.asr.FunAsrEngine
+
+    /** VAD 人声状态透传给本地引擎（静音期跳过 interim decode 省 CPU） */
+    fun setVoiceActive(active: Boolean) {
+        (engine as? com.example.meetingtranscriber.engine.asr.FunAsrEngine)?.isVoiceActive = active
+    }
+
+    /** 会议结束前取当前轮次 speakerId（不切轮），供声纹判定最后一轮 */
+    fun flushSpeakerTurn(): String? =
+        (engine as? com.example.meetingtranscriber.engine.asr.FunAsrEngine)?.currentSpeakerId()
 
     /**
      * 取消转写（不保留结果）。

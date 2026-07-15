@@ -44,4 +44,7 @@ interface TranscriptDao {
 
     @Query("UPDATE transcript_segments SET text = :text WHERE id = :segmentId")
     suspend fun updateText(segmentId: Long, text: String)
+
+    @Query("UPDATE transcript_segments SET text = :text, endTimeMs = :endTimeMs WHERE meetingId = :meetingId AND sentenceId = :sentenceId")
+    suspend fun updateTextAndEnd(meetingId: Long, sentenceId: Long, text: String, endTimeMs: Long): Int
 }

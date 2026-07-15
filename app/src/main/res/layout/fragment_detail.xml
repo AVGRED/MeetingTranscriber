@@ -124,6 +124,53 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- 录音播放器（有录音文件时显示） -->
+        <LinearLayout
+            android:id="@+id/layout_player"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="8dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <ImageButton
+                android:id="@+id/btn_play"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@android:drawable/ic_media_play"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:enabled="false"
+                android:contentDescription="播放录音" />
+
+            <SeekBar
+                android:id="@+id/seek_audio"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:enabled="false" />
+
+            <TextView
+                android:id="@+id/tv_audio_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="@color/on_surface"
+                tools:text="00:00 / 45:30" />
+        </LinearLayout>
+
+        <!-- 录音缺失提示 -->
+        <TextView
+            android:id="@+id/tv_audio_missing"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="录音文件已过期清理，仅保留文字记录"
+            android:textSize="12sp"
+            android:textColor="@color/interim_text"
+            android:visibility="gone" />
+
         <!-- 搜索 + 导出 -->
         <LinearLayout
             android:layout_width="match_parent"

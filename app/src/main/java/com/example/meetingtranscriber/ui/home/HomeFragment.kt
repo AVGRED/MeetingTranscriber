@@ -1,12 +1,17 @@
 package com.example.meetingtranscriber.ui.home
 
+import android.content.ContentValues
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
+import android.provider.MediaStore
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -18,12 +23,54 @@ import com.example.meetingtranscriber.databinding.FragmentHomeBinding
 import com.example.meetingtranscriber.engine.llm.ModelDownloadManager
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class HomeFragment : Fragment() {
+
+    companion object {
+        private const val KEY_PENDING_PHOTO = "pending_photo_uri"
+    }
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
     private val viewModel: HomeViewModel by viewModels()
+
+    /** 拍照输出的 MediaStore 占位 Uri（拍完置回 null） */
+    private var pendingPhotoUri: Uri? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // 相机在前台时本进程可能被杀（低端机常见）：恢复占位 Uri，
+        // 否则拍照结果回来时无处清 IS_PENDING，照片永远不可见
+        pendingPhotoUri = savedInstanceState?.getString(KEY_PENDING_PHOTO)?.let(Uri::parse)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingPhotoUri?.let { outState.putString(KEY_PENDING_PHOTO, it.toString()) }
+    }
+
+    private val takePictureLauncher =
+        registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+            val uri = pendingPhotoUri ?: return@registerForActivityResult
+            pendingPhotoUri = null
+            val resolver = requireContext().contentResolver
+            // 不信任 success 标志（部分国产相机写入成功却报取消）：以照片实际有无内容为准
+            val size = kotlin.runCatching {
+                resolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
+            }.getOrDefault(0L)
+            android.util.Log.i("HomeFragment", "拍照返回 success=$success size=$size")
+            if (size > 0) {
+                Toast.makeText(requireContext(), "已保存到相册", Toast.LENGTH_SHORT).show()
+            } else {
+                resolver.delete(uri, null, null)  // 取消或写入失败 → 清掉空记录
+                if (success) {
+                    Toast.makeText(requireContext(), "拍照保存失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -55,6 +102,39 @@ class HomeFragment : Fragment() {
         binding.btnDownloadModel.setOnClickListener {
             viewModel.downloadQwenModel()
         }
+        binding.btnCamera.setOnClickListener { takePhoto() }
+        binding.btnGallery.setOnClickListener { openGallery() }
+    }
+
+    /** 系统相机拍照，直接写入公共相册 Pictures/MeetingTranscriber（API 29+ 免权限）。
+     *  不用 IS_PENDING 占位（部分国产相机写不进 pending Uri，导致照片丢失），
+     *  取消/失败的空记录由拍照回调按实际大小清理。 */
+    private fun takePhoto() {
+        val resolver = requireContext().contentResolver
+        var uri: Uri? = null
+        try {
+            val name = "MT_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
+            uri = resolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MeetingTranscriber")
+                }
+            ) ?: throw IllegalStateException("MediaStore insert 返回 null")
+            pendingPhotoUri = uri
+            takePictureLauncher.launch(uri)
+        } catch (e: Exception) {
+            android.util.Log.w("HomeFragment", "拉起相机失败: ${e.message}")
+            pendingPhotoUri = null
+            uri?.let { resolver.delete(it, null, null) }
+            Toast.makeText(requireContext(), "无法打开相机", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 跳转 App 内相册页 */
+    private fun openGallery() {
+        (requireActivity() as MainActivity).navigateToAlbum()
     }
 
     private fun observeState() {
@@ -139,8 +219,13 @@ class HomeFragment : Fragment() {
             }
         }
         scope.launch {
-            viewModel.totalMinutes.collect { mins ->
-                binding.tvTotalMinutes.text = mins.toString()
+            viewModel.recordingCount.collect { count ->
+                binding.tvRecordingCount.text = count.toString()
+            }
+        }
+        scope.launch {
+            viewModel.recordingLabel.collect { label ->
+                binding.tvRecordingLabel.text = label
             }
         }
         scope.launch {

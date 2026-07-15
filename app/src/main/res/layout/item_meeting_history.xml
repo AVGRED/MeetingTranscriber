@@ -92,6 +92,15 @@
 
         </LinearLayout>
 
+        <!-- 导出按钮 -->
+        <ImageButton
+            android:id="@+id/btn_export"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_menu_share"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="导出" />
+
         <!-- 上传按钮（仅离线会议显示） -->
         <ImageButton
             android:id="@+id/btn_upload"

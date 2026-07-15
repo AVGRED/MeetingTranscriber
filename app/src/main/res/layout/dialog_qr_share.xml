@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:padding="24dp">
+
+    <!-- 准备中 -->
+    <LinearLayout
+        android:id="@+id/progress_prepare"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ProgressBar
+            android:layout_width="24dp"
+            android:layout_height="24dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="正在准备文件…"
+            android:textSize="14sp"
+            android:textColor="@color/on_surface" />
+    </LinearLayout>
+
+    <!-- 二维码 -->
+    <ImageView
+        android:id="@+id/iv_qr"
+        android:layout_width="240dp"
+        android:layout_height="240dp"
+        android:visibility="gone"
+        android:contentDescription="下载二维码"
+        tools:visibility="visible" />
+
+    <TextView
+        android:id="@+id/tv_url"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textSize="13sp"
+        android:textColor="@color/on_background"
+        android:textIsSelectable="true"
+        android:visibility="gone"
+        tools:visibility="visible"
+        tools:text="http://192.168.1.100:8888/a1b2c3d4/" />
+
+    <TextView
+        android:id="@+id/tv_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center"
+        android:text="同一 WiFi/热点内扫码或输入网址下载\n下载完成前请保持此窗口打开"
+        android:textSize="12sp"
+        android:textColor="@color/on_surface_variant"
+        android:visibility="gone"
+        tools:visibility="visible" />
+
+</LinearLayout>

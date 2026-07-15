@@ -17,6 +17,13 @@ class MeetingRepository(private val db: AppDatabase) {
         }
     }
 
+    /** 标题搜索下推 SQL（替代全表读 + 内存过滤） */
+    fun searchMeetings(query: String): Flow<List<MeetingInfo>> {
+        return meetingDao.searchMeetings(query).map { entities ->
+            entities.map { it.toInfo() }
+        }
+    }
+
     suspend fun getMeeting(id: Long): MeetingInfo? {
         return meetingDao.getById(id)?.toInfo()
     }
@@ -53,6 +60,12 @@ class MeetingRepository(private val db: AppDatabase) {
 
     suspend fun saveSummary(meetingId: Long, summary: String) {
         meetingDao.updateSummary(meetingId, summary)
+    }
+
+    /** 重算并回写说话人数（声纹迟到判定合并标签后修正用） */
+    suspend fun updateSpeakerCount(meetingId: Long) {
+        val count = transcriptDao.getDisplaySpeakers(meetingId).size
+        meetingDao.updateSpeakerCount(meetingId, count)
     }
 
     suspend fun deleteMeeting(meetingId: Long) {
