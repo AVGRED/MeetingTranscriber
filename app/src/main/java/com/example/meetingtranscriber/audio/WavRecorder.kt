@@ -37,6 +37,10 @@ class WavRecorder(
     private var plainOutputStream: FileOutputStream? = null
     private var encryptedFile: EncryptedFile? = null
     private var encryptedOutputStream: FileOutputStream? = null
+    /** 加密流外包 64KB 缓冲：EncryptedFile 每次 write 都走 Tink AES 段加密 + syscall，
+     *  10 次/s 逐帧写在低端机是持续 IO 抖动源；批量化后降到 ~0.5 次/s。
+     *  代价：崩溃最多丢 2s 尾音（恢复机制本就是 5s 粒度，影响可忽略） */
+    private var bufferedOut: java.io.BufferedOutputStream? = null
     private var totalBytes = 0L
 
     @Volatile var isRecording = false
@@ -79,11 +83,12 @@ class WavRecorder(
             EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB
         ).build()
         encryptedOutputStream = encryptedFile!!.openFileOutput() as FileOutputStream
+        bufferedOut = java.io.BufferedOutputStream(encryptedOutputStream, 64 * 1024)
 
         // 写入 MTEW 头（20 字节）作为加密流的开头
         val header = buildMTEWHeader()
-        encryptedOutputStream!!.write(header)
-        encryptedOutputStream!!.flush()
+        bufferedOut!!.write(header)
+        bufferedOut!!.flush()
     }
 
     private fun startPlain() {
@@ -93,8 +98,8 @@ class WavRecorder(
 
     fun write(pcmData: ByteArray) {
         try {
-            if (encryptedOutputStream != null) {
-                encryptedOutputStream!!.write(pcmData)
+            if (bufferedOut != null) {
+                bufferedOut!!.write(pcmData)
             } else {
                 raf?.write(pcmData)
             }
@@ -108,8 +113,10 @@ class WavRecorder(
     fun stop(): Long {
         isRecording = false
         return try {
-            if (encryptedOutputStream != null) {
-                encryptedOutputStream!!.close()
+            if (bufferedOut != null) {
+                bufferedOut!!.flush()
+                bufferedOut!!.close()  // 级联关闭底层加密流（finalize GCM 段）
+                bufferedOut = null
                 encryptedOutputStream = null
                 encryptedFile = null
             }
@@ -130,11 +137,12 @@ class WavRecorder(
     fun cancel() {
         isRecording = false
         try {
-            encryptedOutputStream?.close()
+            bufferedOut?.close()
         } catch (_: Exception) {}
         try {
             raf?.close()
         } catch (_: Exception) {}
+        bufferedOut = null
         encryptedOutputStream = null
         encryptedFile = null
         raf = null
