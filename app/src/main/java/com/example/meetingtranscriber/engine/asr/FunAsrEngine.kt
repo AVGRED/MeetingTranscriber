@@ -244,8 +244,10 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
         }
         silenceSkipLogged = false
 
-        // 快照音频数据 + recognizer（持锁极短，不阻塞 processAudio）
-        val snapshot: FloatArray
+        // 快照 chunk 引用列表 + recognizer（持锁极短，不阻塞 processAudio）。
+        // 只拷贝 ~80 个数组引用，不再拼接 512KB FloatArray（每 250ms 一次的
+        // 大块分配 = 低端机 GC 抖动源）；锁外对 interim stream 逐块 acceptWaveform
+        val chunks: List<FloatArray>
         val rec: OfflineRecognizer?
         synchronized(engineLock) {
             if (recentChunks.isEmpty() || recentSamples < SAMPLE_RATE * 3 / 10) {
@@ -256,12 +258,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
             }
             rec = recognizer
             if (rec == null || _engineStatus.value.state != EngineState.RUNNING) return false
-            snapshot = FloatArray(recentSamples.toInt())
-            var pos = 0
-            for (chunk in recentChunks) {
-                System.arraycopy(chunk, 0, snapshot, pos, chunk.size)
-                pos += chunk.size
-            }
+            chunks = recentChunks.toList()
             lastInterimBytes = totalBytesProcessed
         }
 
@@ -273,7 +270,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                 if (recognizer == null || _engineStatus.value.state != EngineState.RUNNING) return false
                 val interimStream = rec!!.createStream()
                 try {
-                    interimStream.acceptWaveform(snapshot, SAMPLE_RATE)
+                    for (chunk in chunks) interimStream.acceptWaveform(chunk, SAMPLE_RATE)
                     rec!!.decode(interimStream)
                     text = rec!!.getResult(interimStream).text.trim()
                 } finally {

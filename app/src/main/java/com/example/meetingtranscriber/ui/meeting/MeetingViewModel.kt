@@ -88,58 +88,44 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
      *  实际停顿约 0.75s 即切轮；切分过碎由声纹合并兜底，切不开才是致命的 */
     private val speakerGapThresholdFrames = 5
 
+    // ── 音频管线扇出通道：WAV 存档与转写链各自独立背压 ──
+    // 不能共用一条队列：加密 WAV 写入的 IO 抖动会拖慢 VAD/ASR 链，反之 final
+    // decode 卡顿也会丢录音存档。DROP_OLDEST 保证最坏情况只丢最旧帧不阻塞采集
+    private val wavChannel = kotlinx.coroutines.channels.Channel<ByteArray>(
+        capacity = 256, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST) // ≈25.6s
+    private val procChannel = kotlinx.coroutines.channels.Channel<ByteArray>(
+        capacity = 64, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)  // ≈6.4s
+
     init {
-        // --- 音频采集 → VAD（UI 指示 + 说话人切换）→ ASR 转写 ---
-        // Dispatchers.IO：OfflineRecognizer.decode() 为 CPU 密集操作
-        // SenseVoice 是批处理引擎：只累积音频，decode 在 VAD 停顿或结束会议时触发
+        // --- 音频采集 → 零计算分发器 → 两条独立消费链 ---
+        // 原先单收集器串行做 加密WAV写+VAD+声纹+ASR，任一环节 >100ms 就积压
+        // 6.4s 共享缓冲后四路一起丢帧（连录音存档都缺）
         viewModelScope.launch(Dispatchers.IO) {
             audioCaptureManager.audioStream.collect { pcmData ->
                 if (_uiState.value.isMeetingActive && !_uiState.value.isPaused) {
-                    wavRecorder?.write(pcmData)
-                    val isVoice = sileroVad?.isVoice(pcmData) ?: vadDetector.isVoice(pcmData)
-                    // 透传给本地引擎：静音期跳过 interim decode（volatile 写，无开销）
-                    transcriptionUseCase.setVoiceActive(isVoice)
-                    if (_uiState.value.isSpeaking != isVoice) {
-                        _uiState.update { it.copy(isSpeaking = isVoice) }
-                        android.util.Log.d("MeetingViewModel",
-                            if (isVoice) "VAD: 语音开始" else "VAD: 静音开始")
-                    }
-                    if (isVoice) {
-                        speakerGapFrames = 0
-                        // 声纹只累积人声帧（静音会稀释声纹向量）
-                        if (voiceprintEnabled) voiceprint.feed(pcmData)
-                    } else {
-                        // 限制计数上限防止溢出
-                        if (speakerGapFrames < speakerGapThresholdFrames + 50) {
-                            speakerGapFrames++
-                        }
-                        // 沉默刚满阈值当帧立即切句定稿（== 保证每段沉默只触发一次）。
-                        // 不能等语音恢复才切：定稿会被拖到下一人开口后（实测多等
-                        // 1-3s，对方不说话就一直不定稿），且 decode 白白多算静音尾巴
-                        if (speakerGapFrames == speakerGapThresholdFrames) {
-                            try {
-                                val endedTurn = transcriptionUseCase.switchSpeaker()
-                                // 真正切轮时声纹判定上一轮身份（不足 1s 跳过则继续累积）
-                                if (voiceprintEnabled && endedTurn != null) {
-                                    voiceprint.onTurnEnded(endedTurn)
-                                }
-                                android.util.Log.d("MeetingViewModel",
-                                    "沉默 ${speakerGapFrames * 100}ms → 切句定稿")
-                            } catch (e: Exception) {
-                                android.util.Log.e("MeetingViewModel",
-                                    "说话人切换异常: ${e.message}")
-                            }
-                        }
-                    }
-                    // 所有帧无条件喂 ASR：转写不依赖 VAD 判定（VAD 只管切轮与 UI），
-                    // VAD 误判静音时转写不断粮；SenseVoice 批处理引擎，静音无害
-                    try {
-                        transcriptionUseCase.processAudio(pcmData)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MeetingViewModel",
-                            "processAudio 异常: ${e.message}")
-                    }
+                    wavChannel.trySend(pcmData)
+                    procChannel.trySend(pcmData)
                 }
+            }
+        }
+
+        // 分支 1：WAV 录音存档（加密文件 IO，独立于转写链）
+        viewModelScope.launch(Dispatchers.IO) {
+            for (pcmData in wavChannel) {
+                try {
+                    wavRecorder?.write(pcmData)
+                } catch (e: Exception) {
+                    android.util.Log.e("MeetingViewModel", "WAV 写入异常: ${e.message}")
+                }
+            }
+        }
+
+        // 分支 2：VAD → 声纹 feed → 切轮 → ASR feed。
+        // 同帧内保持原有顺序语义：切轮与 ASR 喂入的相对时序决定说话人边界归属，
+        // 不可再拆并行（会引入 ±几帧的归属漂移）
+        viewModelScope.launch(Dispatchers.IO) {
+            for (pcmData in procChannel) {
+                processFrame(pcmData)
             }
         }
 
@@ -196,6 +182,57 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+    }
+
+    /**
+     * 转写链单帧处理（分支 2 消费协程串行调用，100ms/帧）：
+     * VAD（UI 指示 + 说话人切换）→ 声纹累积 → ASR 喂入。
+     * SenseVoice 是批处理引擎：只累积音频，decode 在 VAD 停顿或结束会议时触发。
+     */
+    private fun processFrame(pcmData: ByteArray) {
+        val isVoice = sileroVad?.isVoice(pcmData) ?: vadDetector.isVoice(pcmData)
+        // 透传给本地引擎：静音期跳过 interim decode（volatile 写，无开销）
+        transcriptionUseCase.setVoiceActive(isVoice)
+        if (_uiState.value.isSpeaking != isVoice) {
+            _uiState.update { it.copy(isSpeaking = isVoice) }
+            android.util.Log.d("MeetingViewModel",
+                if (isVoice) "VAD: 语音开始" else "VAD: 静音开始")
+        }
+        if (isVoice) {
+            speakerGapFrames = 0
+            // 声纹只累积人声帧（静音会稀释声纹向量）
+            if (voiceprintEnabled) voiceprint.feed(pcmData)
+        } else {
+            // 限制计数上限防止溢出
+            if (speakerGapFrames < speakerGapThresholdFrames + 50) {
+                speakerGapFrames++
+            }
+            // 沉默刚满阈值当帧立即切句定稿（== 保证每段沉默只触发一次）。
+            // 不能等语音恢复才切：定稿会被拖到下一人开口后（实测多等
+            // 1-3s，对方不说话就一直不定稿），且 decode 白白多算静音尾巴
+            if (speakerGapFrames == speakerGapThresholdFrames) {
+                try {
+                    val endedTurn = transcriptionUseCase.switchSpeaker()
+                    // 真正切轮时声纹判定上一轮身份（不足 1s 跳过则继续累积）
+                    if (voiceprintEnabled && endedTurn != null) {
+                        voiceprint.onTurnEnded(endedTurn)
+                    }
+                    android.util.Log.d("MeetingViewModel",
+                        "沉默 ${speakerGapFrames * 100}ms → 切句定稿")
+                } catch (e: Exception) {
+                    android.util.Log.e("MeetingViewModel",
+                        "说话人切换异常: ${e.message}")
+                }
+            }
+        }
+        // 所有帧无条件喂 ASR：转写不依赖 VAD 判定（VAD 只管切轮与 UI），
+        // VAD 误判静音时转写不断粮；SenseVoice 批处理引擎，静音无害
+        try {
+            transcriptionUseCase.processAudio(pcmData)
+        } catch (e: Exception) {
+            android.util.Log.e("MeetingViewModel",
+                "processAudio 异常: ${e.message}")
+        }
     }
 
     /** 在线/离线会议 — 引擎自动路由 */
