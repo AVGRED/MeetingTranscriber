@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -106,15 +105,15 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
 
                 _engineStatus.value = EngineStatus(EngineState.LOADING, "正在加载语音模型...")
                 try {
-                    val model = ensureFile(MODEL_FILE_NAME)
-                    val tokens = ensureFile(TOKENS_FILE_NAME)
-                    Log.i(TAG, "模型: ${model.absolutePath} (${model.length()} bytes)")
+                    // AssetManager 直读（.onnx 已 noCompress）：免 237MB assets→filesDir
+                    // 拷贝（首次开会慢闪存 10s+）与双份存储；sherpa-onnx JNI 原生支持
+                    Log.i(TAG, "从 assets 直读模型: $ASSET_MODEL_PATH/$MODEL_FILE_NAME")
 
-                    recognizer = OfflineRecognizer(null, OfflineRecognizerConfig(
+                    recognizer = OfflineRecognizer(context.assets, OfflineRecognizerConfig(
                         modelConfig = OfflineModelConfig(
                             senseVoice = OfflineSenseVoiceModelConfig(
-                                model = model.absolutePath, language = "auto"),
-                            tokens = tokens.absolutePath,
+                                model = "$ASSET_MODEL_PATH/$MODEL_FILE_NAME", language = "auto"),
+                            tokens = "$ASSET_MODEL_PATH/$TOKENS_FILE_NAME",
                             // 按核数取 2~4：decode 由 decodeLock 串行化，同一时刻只有
                             // 一个 decode 在跑，多线程不叠加；8 核机 4 线程可显著缩短
                             // interim/final 单次 decode 耗时（出字节奏直接受益）
@@ -156,7 +155,9 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
                     // 启动 final decode 消费协程（与 interim 分开：finalize 只停
                     // interim，消费协程须活到收尾把最后一句解完）
                     decodeScope?.cancel()
-                    decodeChannel = Channel(capacity = 4)
+                    // 容量 16：每积压 stream 持最多 8s native 音频 ≈512KB，上限 ~8MB；
+                    // 4 太紧，低端机连续快语 + IO 抖动会误丢句
+                    decodeChannel = Channel(capacity = 16)
                     decodeScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
                     decodeConsumerJob = decodeScope!!.launch {
                         for (pending in decodeChannel!!) {
@@ -420,7 +421,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
         recentSamples = 0L
         val sent = decodeChannel?.trySend(pending)
         if (sent?.isSuccess != true) {
-            // 积压 4 段还没消费完 = 实时率已崩，丢弃防止无限堆积 native 内存
+            // 积压 16 段还没消费完 = 实时率已崩，丢弃防止无限堆积 native 内存
             Log.e(TAG, "decode 队列满，丢弃句${pending.sentenceId}")
             try { pending.stream.release() } catch (_: Exception) {}
         }
@@ -468,23 +469,6 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
         buf.rewind()
         for (i in 0 until n) samples[i] = buf[i].toFloat() / 32768f
         return samples
-    }
-
-    private fun ensureFile(fileName: String): File {
-        val dir = File(context.filesDir, MODEL_DIR).also { it.mkdirs() }
-        val file = File(dir, fileName)
-        if (!file.exists()) {
-            Log.i(TAG, "拷贝 $fileName 从 assets...")
-            val tmp = File(dir, "$fileName.tmp")
-            try {
-                context.assets.open("$ASSET_MODEL_PATH/$fileName").use { src ->
-                    tmp.outputStream().use { dst -> src.copyTo(dst) }
-                }
-                if (!tmp.renameTo(file)) { tmp.copyTo(file, overwrite = true); tmp.delete() }
-            } catch (e: Exception) { tmp.delete(); file.delete(); throw e }
-            Log.i(TAG, "$fileName 拷贝完成 (${file.length()} bytes)")
-        }
-        return file
     }
 
     companion object {

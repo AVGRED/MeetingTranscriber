@@ -66,6 +66,7 @@ class MeetingApplication : Application() {
                 funAsrLocal.initialize(this@MeetingApplication)
             }
             cleanupExpiredRecordings()
+            cleanupLegacyAsrModelCopy()
             AudioCacheManager.cleanup(this@MeetingApplication)
             StorageMonitor.maybeNotify(this@MeetingApplication)
             val info = UpdateChecker.check(this@MeetingApplication)
@@ -116,6 +117,19 @@ class MeetingApplication : Application() {
                 file.delete()
                 Log.i("MeetingApplication", "已清理过期录音: ${file.name}")
             }
+        }
+    }
+
+    /** ASR 已改为 assets 直读，删除旧版拷到 filesDir 的 237MB 模型副本（一次性回收）。
+     *  只删 ASR 两个文件——同目录 models/ 还存放 Qwen gguf，不能整目录删 */
+    private fun cleanupLegacyAsrModelCopy() {
+        val dir = java.io.File(filesDir, FunAsrEngine.MODEL_DIR)
+        listOf(FunAsrEngine.MODEL_FILE_NAME, FunAsrEngine.TOKENS_FILE_NAME).forEach { name ->
+            val f = java.io.File(dir, name)
+            if (f.exists() && f.delete()) {
+                Log.i("MeetingApplication", "已清理遗留 ASR 模型副本: $name")
+            }
+            java.io.File(dir, "$name.tmp").delete()
         }
     }
 }

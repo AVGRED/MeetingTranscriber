@@ -53,6 +53,13 @@ package com.example.meetingtranscriber.engine.llm
  */
 object LlmNative {
 
+    /** 加载 JNI 库。原先全工程无此调用，所有 native 方法必抛 UnsatisfiedLinkError，
+     *  本地 Qwen 引擎实际是死代码。首次触碰 LlmNative（即首次生成纪要）时加载，
+     *  失败由 QwenEngine.initialize 的 UnsatisfiedLinkError 分支兜底降级 */
+    init {
+        System.loadLibrary("llama_jni")
+    }
+
     /**
      * 加载 GGUF 模型到 llama.cpp。
      *

@@ -211,66 +211,101 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         viewModelScope.launch {
-            // 清空上次会议的残留数据
-            _segments.value = emptyList()
-            processedSentenceCount = 0
-            lastAppendedSentenceId = -1L
-            speakerLabelMap.clear()
-            lastIdentifiedLabel = null
-            speakerGapFrames = 0
-            pendingSegmentsForRecovery.clear()
+            // 本次启动已创建的会议行 id（失败回滚用；不能用 currentMeetingId 判断——
+            // 它可能残留上一场会议的 id）
+            var createdMeetingId = 0L
+            try {
+                // 清空上次会议的残留数据
+                _segments.value = emptyList()
+                processedSentenceCount = 0
+                lastAppendedSentenceId = -1L
+                speakerLabelMap.clear()
+                lastIdentifiedLabel = null
+                speakerGapFrames = 0
+                pendingSegmentsForRecovery.clear()
 
-            if (!audioCaptureManager.hasPermission()) {
-                _uiState.update { it.copy(errorMessage = "缺少录音权限") }
-                return@launch
+                if (!audioCaptureManager.hasPermission()) {
+                    _uiState.update { it.copy(errorMessage = "缺少录音权限") }
+                    abortStartup(createdMeetingId)
+                    return@launch
+                }
+
+                currentMeetingTitle = title.ifBlank { "会议" }
+                currentMeetingId = meetingRepository.createMeeting(title, tag)
+                createdMeetingId = currentMeetingId
+                meetingStartTime = System.currentTimeMillis()
+
+                // Silero VAD 后台加载兜底：确保开会时神经 VAD 已就绪（通常早已完成，join 为零成本）
+                sileroVadReady.join()
+                // AudioRecord 构建 + startRecording 含系统服务 IPC，移出主线程
+                val started = withContext(Dispatchers.IO) { audioCaptureManager.start() }
+                if (!started) {
+                    _uiState.update { it.copy(errorMessage = "启动音频采集失败") }
+                    abortStartup(createdMeetingId)
+                    return@launch
+                }
+
+                // 同时启动本地 WAV 录音存档
+                val app = getApplication<com.example.meetingtranscriber.MeetingApplication>()
+                val recordingsDir = app.getExternalFilesDir("realtime_recordings") ?: app.filesDir
+                recordingsDir.mkdirs()
+                val wavFile = File(recordingsDir, "realtime_${currentMeetingId}_${System.currentTimeMillis()}.wav")
+                // Keystore 取密钥 + EncryptedFile 建流是慢操作（低端机数百 ms），移出主线程
+                val recorder = withContext(Dispatchers.IO) {
+                    val encKey = CryptoManager.getFileSecretKey()
+                    WavRecorder(wavFile, encKey).takeIf { it.start() }
+                }
+                wavRecorder = recorder
+                if (recorder == null) {
+                    android.util.Log.w("MeetingViewModel", "实时音频存档启动失败")
+                } else {
+                    meetingRepository.updateAudioFilePath(currentMeetingId, wavFile.absolutePath)
+                }
+
+                if (!connectAsr(language, engineTypeOverride)) {
+                    abortStartup(createdMeetingId)
+                    return@launch
+                }
+
+                // 本地引擎才启用声纹识别（云端有服务端分离）；模型加载失败则降级为轮次递增
+                voiceprintEnabled = transcriptionUseCase.isLocalFunAsr() &&
+                    withContext(Dispatchers.IO) { voiceprint.initialize(getApplication()) }
+                if (voiceprintEnabled) voiceprint.reset()
+
+                _uiState.update { it.copy(
+                    isMeetingActive = true,
+                    isPaused = false,
+                    isSpeaking = false,
+                    errorMessage = null,
+                    selectedLanguage = language
+                ) }
+                startTimer()
+                startRecoverySaver()
+            } catch (e: Exception) {
+                android.util.Log.e("MeetingViewModel", "startMeeting 异常: ${e.message}", e)
+                _uiState.update { it.copy(errorMessage = "启动会议失败: ${e.message}") }
+                abortStartup(createdMeetingId)
             }
+        }
+    }
 
-            currentMeetingTitle = title.ifBlank { "会议" }
-            currentMeetingId = meetingRepository.createMeeting(title, tag)
-            meetingStartTime = System.currentTimeMillis()
-
-            // Silero VAD 后台加载兜底：确保开会时神经 VAD 已就绪（通常早已完成，join 为零成本）
-            sileroVadReady.join()
-            // AudioRecord 构建 + startRecording 含系统服务 IPC，移出主线程
-            val started = withContext(Dispatchers.IO) { audioCaptureManager.start() }
-            if (!started) {
-                _uiState.update { it.copy(errorMessage = "启动音频采集失败") }
-                return@launch
-            }
-
-            // 同时启动本地 WAV 录音存档
-            val app = getApplication<com.example.meetingtranscriber.MeetingApplication>()
-            val recordingsDir = app.getExternalFilesDir("realtime_recordings") ?: app.filesDir
-            recordingsDir.mkdirs()
-            val wavFile = File(recordingsDir, "realtime_${currentMeetingId}_${System.currentTimeMillis()}.wav")
-            // Keystore 取密钥 + EncryptedFile 建流是慢操作（低端机数百 ms），移出主线程
-            val recorder = withContext(Dispatchers.IO) {
-                val encKey = CryptoManager.getFileSecretKey()
-                WavRecorder(wavFile, encKey).takeIf { it.start() }
-            }
-            wavRecorder = recorder
-            if (recorder == null) {
-                android.util.Log.w("MeetingViewModel", "实时音频存档启动失败")
-            } else {
-                meetingRepository.updateAudioFilePath(currentMeetingId, wavFile.absolutePath)
-            }
-
-            if (!connectAsr(language, engineTypeOverride)) return@launch
-
-            // 本地引擎才启用声纹识别（云端有服务端分离）；模型加载失败则降级为轮次递增
-            voiceprintEnabled = transcriptionUseCase.isLocalFunAsr() &&
-                withContext(Dispatchers.IO) { voiceprint.initialize(getApplication()) }
-            if (voiceprintEnabled) voiceprint.reset()
-
-            _uiState.update { it.copy(
-                isMeetingActive = true,
-                isPaused = false,
-                isSpeaking = false,
-                errorMessage = null,
-                selectedLanguage = language
-            ) }
-            startTimer()
-            startRecoverySaver()
+    /**
+     * 启动失败统一回滚：停采集/录音存档/前台服务（Fragment 在 startMeeting 之前
+     * 已拉起服务，任何失败出口不清理都会留下热麦克风 + 常驻通知），并删除本次
+     * 已创建的空会议行。保证失败后可干净重试。
+     */
+    private suspend fun abortStartup(createdMeetingId: Long) {
+        try { audioCaptureManager.stop() } catch (_: Exception) {}
+        try { wavRecorder?.cancel() } catch (_: Exception) {}
+        wavRecorder = null
+        val app = getApplication<MeetingApplication>()
+        try {
+            app.stopService(android.content.Intent(
+                app, com.example.meetingtranscriber.audio.AudioCaptureService::class.java))
+        } catch (_: Exception) {}
+        if (createdMeetingId != 0L) {
+            try { meetingRepository.deleteMeeting(createdMeetingId) } catch (_: Exception) {}
+            currentMeetingId = 0L
         }
     }
 

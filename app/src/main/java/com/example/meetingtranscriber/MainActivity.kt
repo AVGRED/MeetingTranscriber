@@ -72,12 +72,17 @@ class MainActivity : AppCompatActivity() {
     /** 跳转到 Meeting tab 并启动指定模式 */
     fun navigateToMeeting(mode: String) {
         binding.bottomNavigation.selectedItemId = R.id.nav_meeting
-        binding.root.post {
-            val frag = supportFragmentManager.findFragmentByTag("meeting") as? MeetingFragment
-            when (mode) {
-                "realtime" -> frag?.startOnlineMeeting()
-                "offline" -> frag?.startOfflineMeeting()
-            }
+        // 同步执行挂起的事务后直接取 Fragment：原来的 binding.root.post{} 存在时序
+        // 竞态——post 先于事务执行时拿到 null，启动请求被静默丢弃（点了没反应）
+        supportFragmentManager.executePendingTransactions()
+        val frag = supportFragmentManager.findFragmentByTag("meeting") as? MeetingFragment
+        if (frag == null) {
+            android.util.Log.e("MainActivity", "navigateToMeeting: meeting fragment 不存在")
+            return
+        }
+        when (mode) {
+            "realtime" -> frag.startOnlineMeeting()
+            "offline" -> frag.startOfflineMeeting()
         }
     }
 
@@ -108,12 +113,9 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("恢复") { _, _ ->
                 MeetingApplication.pendingRecoveryState = null
                 binding.bottomNavigation.selectedItemId = R.id.nav_meeting
-                val meetingFrag = MeetingFragment()
-                showFragment(meetingFrag, "meeting")
-                binding.root.post {
-                    val activeFrag = supportFragmentManager.findFragmentByTag("meeting") as? MeetingFragment
-                    activeFrag?.recoverFromCrash(state)
-                }
+                supportFragmentManager.executePendingTransactions()
+                val activeFrag = supportFragmentManager.findFragmentByTag("meeting") as? MeetingFragment
+                activeFrag?.recoverFromCrash(state)
             }
             .setNegativeButton("放弃") { _, _ ->
                 MeetingApplication.pendingRecoveryState = null

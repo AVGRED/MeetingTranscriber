@@ -231,6 +231,15 @@ class MeetingFragment : Fragment() {
         }
 
         when (state.connectionState) {
+            ConnectionState.CONNECTING -> {
+                // 本地引擎首次加载模型需 3-4s：给出加载反馈，不再无提示假死
+                binding.layoutConnectionBanner.visibility = View.VISIBLE
+                binding.layoutConnectionBanner.setBackgroundColor(
+                    ContextCompat.getColor(requireContext(), R.color.status_paused)
+                )
+                binding.tvConnectionStatus.text = "正在启动语音引擎…"
+                binding.btnRetry.visibility = View.GONE
+            }
             ConnectionState.RECONNECTING -> {
                 binding.layoutConnectionBanner.visibility = View.VISIBLE
                 binding.layoutConnectionBanner.setBackgroundColor(
@@ -244,7 +253,9 @@ class MeetingFragment : Fragment() {
                 binding.layoutConnectionBanner.setBackgroundColor(
                     ContextCompat.getColor(requireContext(), R.color.error_red)
                 )
-                binding.tvConnectionStatus.text = "连接失败，请检查网络后重试"
+                // 优先显示引擎真实错误（本地模型加载失败时"检查网络"是误导）
+                binding.tvConnectionStatus.text =
+                    state.errorMessage ?: "连接失败，请检查网络后重试"
                 binding.btnRetry.visibility = View.VISIBLE
             }
             else -> { binding.layoutConnectionBanner.visibility = View.GONE }

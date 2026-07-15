@@ -96,11 +96,13 @@ class QwenEngine(
                 _engineStatus.value = EngineStatus(EngineState.READY, "Qwen-1.8B 已就绪")
                 Log.i(TAG, "Qwen 引擎初始化成功")
                 Result.success(Unit)
-            } catch (e: UnsatisfiedLinkError) {
+            } catch (e: LinkageError) {
+                // UnsatisfiedLinkError / init 块失败的 ExceptionInInitializerError /
+                // 二次触碰的 NoClassDefFoundError 都是 LinkageError 子类
                 val msg = "llama.cpp native 库未找到，请确保 .so 已正确编译"
                 Log.e(TAG, msg, e)
                 _engineStatus.value = EngineStatus(EngineState.ERROR, msg)
-                Result.failure(e)
+                Result.failure(RuntimeException(msg, e))
             } catch (e: Exception) {
                 Log.e(TAG, "Qwen 引擎初始化失败", e)
                 _engineStatus.value = EngineStatus(EngineState.ERROR, "初始化失败: ${e.message}")
