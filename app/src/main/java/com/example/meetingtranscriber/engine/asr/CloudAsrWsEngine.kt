@@ -177,17 +177,17 @@ abstract class CloudAsrWsEngine(
             }
         } else {
             // 未就绪 → 内存缓冲（100ms/帧 × 1200 ≈ 2 分钟，超出丢最旧）
-            if (audioBuffer.size >= MAX_BUFFER_FRAMES) audioBuffer.poll()
+            if (audioBuffer.size >= EngineConstants.MAX_BUFFER_FRAMES) audioBuffer.poll()
             audioBuffer.offer(pcmData.copyOf())
         }
     }
 
-    override fun finalize() {
+    override suspend fun finalize() {
         try {
             webSocket?.let { sendFinishFrame(it) }
         } catch (_: Exception) {}
         // 给服务端一点时间吐最后的结果帧再关闭（各家 final 均在结束帧后返回）
-        try { Thread.sleep(800) } catch (_: InterruptedException) {}
+        try { delay(800) } catch (_: Exception) {}
         try { webSocket?.close(1000, "用户结束会议") } catch (_: Exception) {}
         webSocket = null
         readyForAudio = false
@@ -198,7 +198,7 @@ abstract class CloudAsrWsEngine(
     }
 
     override suspend fun dispose() {
-        reconnectAttempts = MAX_RECONNECT_ATTEMPTS
+        reconnectAttempts = EngineConstants.MAX_RECONNECT_ATTEMPTS
         reconnectConfig = null
         reconnectScope?.cancel()
         reconnectScope = null
@@ -325,16 +325,17 @@ abstract class CloudAsrWsEngine(
 
     private fun scheduleReconnect() {
         readyForAudio = false
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.e(tag, "已达最大重连次数 ($MAX_RECONNECT_ATTEMPTS)，放弃重连")
+        if (reconnectAttempts >= EngineConstants.MAX_RECONNECT_ATTEMPTS) {
+            Log.e(tag, "已达最大重连次数 (${EngineConstants.MAX_RECONNECT_ATTEMPTS})，放弃重连")
             audioBuffer.clear()
             _engineStatus.value = EngineStatus(EngineState.ERROR, "连接失败，已重试 $reconnectAttempts 次")
             return
         }
         reconnectAttempts++
-        val delay = (RECONNECT_BASE_DELAY_MS * reconnectAttempts).coerceAtMost(RECONNECT_MAX_DELAY_MS)
+        val delay = (EngineConstants.RECONNECT_BASE_DELAY_MS * reconnectAttempts)
+            .coerceAtMost(EngineConstants.RECONNECT_MAX_DELAY_MS)
         Log.i(tag, "将在 ${delay}ms 后尝试第 $reconnectAttempts 次重连...")
-        _engineStatus.value = EngineStatus(EngineState.LOADING, "正在重连 ($reconnectAttempts/$MAX_RECONNECT_ATTEMPTS)...")
+        _engineStatus.value = EngineStatus(EngineState.LOADING, "正在重连 ($reconnectAttempts/${EngineConstants.MAX_RECONNECT_ATTEMPTS})...")
         val config = reconnectConfig ?: return
         reconnectScope?.launch {
             delay(delay)
@@ -343,9 +344,6 @@ abstract class CloudAsrWsEngine(
     }
 
     companion object {
-        private const val MAX_BUFFER_FRAMES = 1200
-        private const val MAX_RECONNECT_ATTEMPTS = 5
-        private const val RECONNECT_BASE_DELAY_MS = 1000L
-        private const val RECONNECT_MAX_DELAY_MS = 15000L
+        // 常量已迁移至 EngineConstants — 保留引用以保持兼容
     }
 }

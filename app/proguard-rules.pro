@@ -28,12 +28,17 @@
 -keep class com.k2fsa.sherpa.onnx.** { *; }
 -keepclassmembers class com.k2fsa.sherpa.onnx.** { *; }
 
-# llama.cpp JNI bridge (LLM engine — native methods resolved by exact name)
--keep class com.example.meetingtranscriber.engine.llm.LlmNative { *; }
--keepclassmembers class com.example.meetingtranscriber.engine.llm.LlmNative { *; }
+# NanoHTTPD (局域网分享)
+-keep class org.nanohttpd.** { *; }
+-dontwarn org.nanohttpd.**
 
-# llama.cpp C++ standard library (bundled .so)
--keep class com.example.meetingtranscriber.engine.llm.* { *; }
+# ZXing (二维码生成)
+-keep class com.google.zxing.** { *; }
+-dontwarn com.google.zxing.**
+
+# AndroidX Security Crypto
+-keep class androidx.security.crypto.** { *; }
+-dontwarn androidx.security.crypto.**
 
 # 剥离 release 热路径调试日志（interim decode 每 250ms、VAD 状态翻转、逐句累计
 # 等 Log.d 在 release 存活是无谓开销）。只剥 v/d，保留 i/w/e 供现场诊断

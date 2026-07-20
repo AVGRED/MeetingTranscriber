@@ -167,7 +167,7 @@ class VoiceprintIdentifier(private val scope: CoroutineScope) {
 
     /**
      * 仅释放 native 模型（27MB CAM++），保留线程池与回调，可再 initialize——
-     * 会议结束后的内存编排用（纪要生成要加载 1.1GB Qwen，先腾出无用会话）。
+     * 会议结束后的内存编排用（纪要生成前腾出无用会话）。
      * 释放任务经声纹专用单线程队列排队：FIFO 保证已入队的最后一轮判定
      * 先跑完（此时 extractor 仍有效），之后才释放。
      */

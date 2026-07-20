@@ -1,17 +1,11 @@
 package com.example.meetingtranscriber.ui.home
 
 import android.app.Application
-import android.os.StatFs
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.meetingtranscriber.MeetingApplication
 import com.example.meetingtranscriber.PreferencesManager
-import com.example.meetingtranscriber.data.db.AppDatabase
-import com.example.meetingtranscriber.data.model.MeetingInfo
-import com.example.meetingtranscriber.data.repository.MeetingRepository
 import com.example.meetingtranscriber.engine.AsrEngineType
 import com.example.meetingtranscriber.engine.LlmEngineType
-import com.example.meetingtranscriber.engine.llm.ModelDownloadManager
 import com.example.meetingtranscriber.network.NetworkMonitor
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -19,10 +13,6 @@ import kotlinx.coroutines.launch
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = PreferencesManager(application)
-    // DB 懒加载：getInstance 首调可能触发 SQLCipher 打开/明文迁移，不能在主线程构造函数付出
-    private val db by lazy { AppDatabase.getInstance(application) }
-    private val repo by lazy { MeetingRepository(db) }
-    private val modelDownloadManager = ModelDownloadManager(application)
 
     // ── 引擎状态 ──
 
@@ -38,26 +28,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // ── 网络状态 ──
 
     val networkAvailable: StateFlow<Boolean> = MutableStateFlow(NetworkMonitor.isNetworkAvailable)
-
-    // ── 统计 ──
-
-    private val _meetingCount = MutableStateFlow(0)
-    val meetingCount: StateFlow<Int> = _meetingCount
-
-    private val _recordingCount = MutableStateFlow(0)
-    val recordingCount: StateFlow<Int> = _recordingCount
-
-    /** 卡片小字：无录音时长时仅"条录音"，否则附加现存录音总时长 */
-    private val _recordingLabel = MutableStateFlow("条录音")
-    val recordingLabel: StateFlow<String> = _recordingLabel
-
-    private val _freeStorageGB = MutableStateFlow("--")
-    val freeStorageGB: StateFlow<String> = _freeStorageGB
-
-    // ── 最近会议 ──
-
-    private val _recentMeetings = MutableStateFlow<List<MeetingInfo>>(emptyList())
-    val recentMeetings: StateFlow<List<MeetingInfo>> = _recentMeetings
 
     // ── 问候语 ──
 
@@ -82,7 +52,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             refreshEngineBadges()
         }
-        loadHomeData()
         observeNetwork()
     }
 
@@ -98,46 +67,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 .of(asrType)?.hasKeys(prefs) ?: false
         }
         (llmHasKey as MutableStateFlow).value = when (val type = prefs.preferredLlmEngine) {
-            LlmEngineType.QWEN_LOCAL -> modelDownloadManager.isModelDownloaded()
             LlmEngineType.DOUBAO_CLOUD -> prefs.hasArkKey()
             LlmEngineType.DASHSCOPE_CLOUD -> prefs.hasDashScopeKey()
             // DeepSeek/Kimi/智谱/硅基流动 等 OpenAI 兼容厂家
             else -> prefs.hasLlmKey(type)
-        }
-    }
-
-    /** 统计 + 最近会议合并为一次全表查询（原先 loadStats/loadRecentMeetings 各查一遍） */
-    private fun loadHomeData() {
-        viewModelScope.launch {
-            // 首次触碰 lazy db 必须在 IO：getInstance 可能触发明文迁移/SQLCipher 打开
-            //（真机实测迁移 166ms，若 lazy 在 Main 协程解析就会抢在主线程执行）
-            val meetings = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                repo.getAllMeetingsOnce()
-            }
-            _meetingCount.value = meetings.size
-            _recentMeetings.value = meetings.filter { !it.isArchived }.take(3)
-            // 条录音 = 录音文件仍存在的会议数（30 天清理后不再计入，与实际可播放的录音对齐）
-            val withRecording = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                meetings.filter { m ->
-                    !m.audioFilePath.isNullOrBlank() && java.io.File(m.audioFilePath).exists()
-                }
-            }
-            _recordingCount.value = withRecording.size
-            val totalSeconds = withRecording.sumOf { it.durationSeconds.toLong() }
-            _recordingLabel.value = when {
-                totalSeconds <= 0 -> "条录音"
-                totalSeconds >= 2 * 3600 -> "条录音·" + String.format("%.1f", totalSeconds / 3600.0) + "小时"
-                else -> "条录音·${(totalSeconds + 59) / 60}分钟"
-            }
-
-            // 存储空间
-            try {
-                val stat = StatFs(getApplication<Application>().filesDir.absolutePath)
-                val freeBytes = stat.availableBytes
-                _freeStorageGB.value = String.format("%.1f", freeBytes / (1024.0 * 1024 * 1024))
-            } catch (_: Exception) {
-                _freeStorageGB.value = "--"
-            }
         }
     }
 
@@ -149,9 +82,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 刷新统计数据（onResume 时调用） */
+    /** 刷新状态（onResume 时调用） */
     fun refresh() {
-        loadHomeData()
         (asrEngineName as MutableStateFlow).value = prefs.preferredAsrEngine.displayName
         (llmEngineName as MutableStateFlow).value = prefs.preferredLlmEngine.displayName
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {

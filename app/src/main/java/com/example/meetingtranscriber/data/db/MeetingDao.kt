@@ -31,6 +31,10 @@ interface MeetingDao {
     @Query("SELECT * FROM meetings WHERE id = :meetingId")
     suspend fun getById(meetingId: Long): MeetingEntity?
 
+    /** 响应式查询：会议数据变更时自动通知订阅者（播放器/纪要实时刷新） */
+    @Query("SELECT * FROM meetings WHERE id = :meetingId")
+    fun getByIdFlow(meetingId: Long): Flow<MeetingEntity?>
+
     @Query("SELECT * FROM meetings WHERE endTime IS NULL LIMIT 1")
     suspend fun getOngoingMeeting(): MeetingEntity?
 

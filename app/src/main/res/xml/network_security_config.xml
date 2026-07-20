@@ -12,4 +12,8 @@
             <certificates src="system" />
         </trust-anchors>
     </domain-config>
+    <!-- FunASR 云端自建服务器（ws:// 明文 WebSocket，无 SSL） -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">47.109.88.107</domain>
+    </domain-config>
 </network-security-config>

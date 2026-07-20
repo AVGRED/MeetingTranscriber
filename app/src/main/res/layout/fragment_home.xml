@@ -3,13 +3,16 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background">
+    android:background="@color/background"
+    android:clipToPadding="false">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingHorizontal="16dp"
+        android:paddingTop="24dp"
+        android:paddingBottom="32dp">
 
         <!-- 问候语 -->
         <TextView
@@ -17,15 +20,16 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="下午好"
-            android:textSize="28sp"
+            android:textSize="30sp"
             android:textColor="@color/on_background"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:letterSpacing="-0.02" />
 
         <TextView
             android:id="@+id/tv_date"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="2dp"
             android:text="2026年7月8日"
             android:textSize="14sp"
             android:textColor="@color/on_surface_variant" />
@@ -34,7 +38,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="24dp"
             android:orientation="horizontal"
             android:baselineAligned="false">
 
@@ -43,39 +47,57 @@
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
                 android:layout_weight="1"
-                app:cardElevation="1dp"
-                app:cardCornerRadius="12dp"
-                app:strokeWidth="0dp">
+                app:cardElevation="0dp"
+                app:cardCornerRadius="16dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/outline_variant">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="12dp">
+                    android:padding="14dp">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="语音转写"
+                        android:text="🎙 语音转写"
                         android:textSize="12sp"
-                        android:textColor="@color/on_surface_variant" />
+                        android:textColor="@color/on_surface_variant"
+                        android:letterSpacing="0.02" />
 
                     <TextView
                         android:id="@+id/tv_asr_engine"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="FunASR 云端"
+                        android:layout_marginTop="6dp"
+                        android:text="FunASR"
                         android:textSize="16sp"
                         android:textColor="@color/on_background"
                         android:textStyle="bold" />
 
-                    <View
-                        android:id="@+id/dot_asr_status"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:background="@drawable/circle_status" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/dot_asr_status"
+                            android:layout_width="8dp"
+                            android:layout_height="8dp"
+                            android:background="@drawable/circle_status" />
+
+                        <TextView
+                            android:id="@+id/tv_asr_status"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:text="已就绪"
+                            android:textSize="11sp"
+                            android:textColor="@color/on_surface_variant" />
+                    </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -84,39 +106,57 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                app:cardElevation="1dp"
-                app:cardCornerRadius="12dp"
-                app:strokeWidth="0dp">
+                app:cardElevation="0dp"
+                app:cardCornerRadius="16dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/outline_variant">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="12dp">
+                    android:padding="14dp">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="AI 摘要"
+                        android:text="✨ AI 摘要"
                         android:textSize="12sp"
-                        android:textColor="@color/on_surface_variant" />
+                        android:textColor="@color/on_surface_variant"
+                        android:letterSpacing="0.02" />
 
                     <TextView
                         android:id="@+id/tv_llm_engine"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Qwen-1.8B 本地"
+                        android:layout_marginTop="6dp"
+                        android:text="豆包"
                         android:textSize="16sp"
                         android:textColor="@color/on_background"
                         android:textStyle="bold" />
 
-                    <View
-                        android:id="@+id/dot_llm_status"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:background="@drawable/circle_status" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/dot_llm_status"
+                            android:layout_width="8dp"
+                            android:layout_height="8dp"
+                            android:background="@drawable/circle_status" />
+
+                        <TextView
+                            android:id="@+id/tv_llm_status"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:text="已配置"
+                            android:textSize="11sp"
+                            android:textColor="@color/on_surface_variant" />
+                    </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
@@ -125,16 +165,17 @@
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            app:cardElevation="1dp"
-            app:cardCornerRadius="12dp"
-            app:strokeWidth="0dp">
+            android:layout_marginTop="20dp"
+            app:cardElevation="0dp"
+            app:cardCornerRadius="16dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="@color/outline_variant">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="18dp">
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -144,31 +185,44 @@
                     android:textColor="@color/on_background"
                     android:textStyle="bold" />
 
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="选择实时在线转写或离线快速会议"
+                    android:textSize="12sp"
+                    android:textColor="@color/on_surface_variant" />
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="14dp"
                     android:orientation="horizontal">
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_realtime"
                         android:layout_width="0dp"
-                        android:layout_height="48dp"
+                        android:layout_height="52dp"
                         android:layout_marginEnd="8dp"
                         android:layout_weight="1"
                         android:text="实时会议"
-                        app:cornerRadius="24dp" />
+                        android:textSize="15sp"
+                        app:cornerRadius="28dp"
+                        app:icon="@android:drawable/ic_menu_call"
+                        app:iconGravity="textStart" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_offline"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="0dp"
-                        android:layout_height="48dp"
-                        android:layout_marginEnd="8dp"
+                        android:layout_height="52dp"
+                        android:layout_marginStart="8dp"
                         android:layout_weight="1"
-                        android:text="离线会议"
-                        app:cornerRadius="24dp" />
-
+                        android:text="快速会议"
+                        android:textSize="15sp"
+                        app:cornerRadius="28dp"
+                        app:icon="@android:drawable/ic_menu_edit"
+                        app:iconGravity="textStart" />
                 </LinearLayout>
 
                 <!-- 拍照存档 + 相册查看 -->
@@ -180,181 +234,87 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_camera"
-                        style="@style/Widget.Material3.Button.TonalButton"
+                        style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="0dp"
                         android:layout_height="48dp"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="4dp"
                         android:layout_weight="1"
                         android:text="拍照"
+                        android:textSize="13sp"
+                        app:icon="@android:drawable/ic_menu_camera"
+                        app:iconGravity="textStart"
+                        app:iconSize="18dp"
                         app:cornerRadius="24dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_gallery"
-                        style="@style/Widget.Material3.Button.TonalButton"
+                        style="@style/Widget.Material3.Button.TextButton"
                         android:layout_width="0dp"
                         android:layout_height="48dp"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginStart="4dp"
                         android:layout_weight="1"
                         android:text="相册"
+                        android:textSize="13sp"
+                        app:icon="@android:drawable/ic_menu_gallery"
+                        app:iconGravity="textStart"
+                        app:iconSize="18dp"
                         app:cornerRadius="24dp" />
-
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 统计 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:baselineAligned="false">
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1"
-                app:cardElevation="1dp"
-                app:cardCornerRadius="12dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-
-                    <TextView
-                        android:id="@+id/tv_meeting_count"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="0"
-                        android:textSize="24sp"
-                        android:textColor="@color/primary"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="场会议"
-                        android:textSize="12sp"
-                        android:textColor="@color/on_surface_variant" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="3dp"
-                android:layout_marginEnd="3dp"
-                android:layout_weight="1"
-                app:cardElevation="1dp"
-                app:cardCornerRadius="12dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-
-                    <TextView
-                        android:id="@+id/tv_recording_count"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="0"
-                        android:textSize="24sp"
-                        android:textColor="@color/primary"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tv_recording_label"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:maxLines="1"
-                        android:text="条录音"
-                        android:textSize="12sp"
-                        android:textColor="@color/on_surface_variant" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                app:cardElevation="1dp"
-                app:cardCornerRadius="12dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-
-                    <TextView
-                        android:id="@+id/tv_free_storage"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="--"
-                        android:textSize="24sp"
-                        android:textColor="@color/primary"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="GB 可用"
-                        android:textSize="12sp"
-                        android:textColor="@color/on_surface_variant" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-        </LinearLayout>
-
-        <!-- 最近会议 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="最近会议"
-                android:textSize="18sp"
-                android:textColor="@color/on_background"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/btn_view_all"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:padding="8dp"
-                android:text="查看全部"
-                android:textColor="@color/primary"
-                android:textSize="14sp" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/tv_empty_recent"
+        <!-- 查看历史会议 -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/btn_history"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="暂无会议记录"
-            android:textSize="14sp"
-            android:textColor="@color/on_surface_variant" />
+            app:cardElevation="0dp"
+            app:cardCornerRadius="16dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="@color/outline_variant"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground">
 
-        <LinearLayout
-            android:id="@+id/layout_recent_meetings"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="18dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="📋 历史会议"
+                        android:textSize="18sp"
+                        android:textColor="@color/on_background"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="查看所有会议记录、转写和 AI 纪要"
+                        android:textSize="13sp"
+                        android:textColor="@color/on_surface_variant" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="→"
+                    android:textSize="20sp"
+                    android:textColor="@color/on_surface_variant" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
     </LinearLayout>
 </ScrollView>

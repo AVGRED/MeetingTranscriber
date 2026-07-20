@@ -35,8 +35,10 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
     private val _isSummaryEdited = MutableStateFlow(false)
     val isSummaryEdited: StateFlow<Boolean> = _isSummaryEdited.asStateFlow()
 
+    /** 响应式：会议行任意字段变更（音频路径/纪要等）自动推送到详情页 */
     val meeting: StateFlow<MeetingInfo?> = meetingId.flatMapLatest { id ->
-        flow { emit(meetingRepository.getMeeting(id)) }
+        if (id == 0L) flowOf(null)
+        else meetingRepository.getMeetingFlow(id)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val segments: StateFlow<List<TranscriptSegment>> = meetingId.flatMapLatest { id ->
@@ -53,6 +55,7 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
         meetingId.value = id
         _searchQuery.value = ""
         _searchResults.value = null
+        formatBackup = null  // 清除旧会议备份，防止跨会议撤销污染
         viewModelScope.launch {
             val m = meetingRepository.getMeeting(id)
             if (m?.summary != null) {
@@ -150,11 +153,11 @@ class DetailViewModel(application: Application) : AndroidViewModel(application) 
                 "${it.displaySpeaker} [${it.formattedTime}]: ${it.text}"
             }
             // 优先使用 SummaryUseCase（通过引擎路由）
-            // Fallback: 所有云端 LLM 不可用且 Qwen 模型未下载时，回退到内置规则生成器
+            // Fallback: 所有云端 LLM 不可用时，回退到内置规则生成器
             val summary = summaryUseCase.generate(
                 getApplication(), fullText, SummaryStyle.STANDARD
             ).getOrElse {
-                @Suppress("DEPRECATION")
+                // 云端 LLM 全部不可用 → 回退内置规则生成器
                 MeetingSummaryGenerator.generate(fullText)
             }
             meetingRepository.saveSummary(m.id, summary)

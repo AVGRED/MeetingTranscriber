@@ -34,7 +34,6 @@ class EngineRouter(
     private var volcengineEngine: AsrEngine? = null,
     /** 通用云端 ASR（阿里 Paraformer/讯飞/腾讯云/百度），按类型索引 */
     private var cloudAsrEngines: Map<AsrEngineType, AsrEngine> = emptyMap(),
-    private var qwenEngine: LlmEngine? = null,
     private var doubaoEngine: LlmEngine? = null,
     private var dashScopeEngine: LlmEngine? = null,
     /** OpenAI 兼容云端 LLM（DeepSeek/Kimi/智谱/硅基流动等），按类型索引 */
@@ -47,14 +46,12 @@ class EngineRouter(
         funAsrCloud: FunAsrCloudEngine? = null,
         tingwu: AsrEngine? = null,
         volcengine: AsrEngine? = null,
-        qwen: LlmEngine? = null,
         doubao: LlmEngine? = null,
         dashScope: LlmEngine? = null
     ) {
         if (funAsrCloud != null) funAsrCloudEngine = funAsrCloud
         if (tingwu != null) tingwuEngine = tingwu
         if (volcengine != null) volcengineEngine = volcengine
-        if (qwen != null) qwenEngine = qwen
         if (doubao != null) doubaoEngine = doubao
         if (dashScope != null) dashScopeEngine = dashScope
     }
@@ -179,7 +176,7 @@ class EngineRouter(
 
     /**
      * 解析当前可用的最佳 LLM 引擎。
-     * 云端优先（更高的生成质量），不可用时降级本地 Qwen。
+     * 纯云端：Key 未配置或网络不可用时直接报错（由上层降级到规则生成器）。
      */
     suspend fun resolveLlmEngine(context: Context): LlmEngine {
         val preferred = prefs.preferredLlmEngine
@@ -187,42 +184,31 @@ class EngineRouter(
 
         logRoute("LLM", preferred.displayName, hasNetwork)
 
-        return when {
-            // ── 用户强制离线，或根本没网 ──
-            preferred == LlmEngineType.QWEN_LOCAL || !hasNetwork -> {
-                if (!hasNetwork && preferred != LlmEngineType.QWEN_LOCAL) {
-                    Log.i(TAG, "🌐 无网络，降级到 Qwen 本地引擎")
-                }
-                if (qwenEngine == null) throw NoEngineException("Qwen 本地引擎未配置")
-                ensureInitializedOrThrow(context, qwenEngine!!)
-                qwenEngine!!
-            }
+        // ── 无网络 → 直接报错（无本地 LLM） ──
+        if (!hasNetwork) {
+            throw NoEngineException("网络不可用，无法使用云端 LLM 生成纪要")
+        }
 
+        return when {
             // ── 豆包 ──
             preferred == LlmEngineType.DOUBAO_CLOUD -> {
                 if (prefs.hasArkKey() && doubaoEngine != null) {
-                    ensureOrFallback(context, doubaoEngine!!, qwenEngine!!, "豆包")
-                } else if (prefs.autoFallback) {
-                    Log.w(TAG, "火山方舟 Key 未配置 → 降级到 Qwen")
-                    if (qwenEngine == null) throw NoEngineException("Qwen 本地引擎未配置，且云端不可用")
-                    ensureInitializedOrThrow(context, qwenEngine!!)
-                    qwenEngine!!
+                    ensureInitializedOrThrow(context, doubaoEngine!!)
+                    doubaoEngine!!
                 } else {
-                    throw NoEngineException("火山方舟 Key 未配置，且自动降级已关闭")
+                    throw NoEngineException(
+                        "火山方舟 Key 未配置。请在「API 配置」页面设置 API Key 和端点 ID。")
                 }
             }
 
             // ── 通义千问 ──
             preferred == LlmEngineType.DASHSCOPE_CLOUD -> {
                 if (prefs.hasDashScopeKey() && dashScopeEngine != null) {
-                    ensureOrFallback(context, dashScopeEngine!!, qwenEngine!!, "DashScope")
-                } else if (prefs.autoFallback) {
-                    Log.w(TAG, "DashScope Key 未配置 → 降级到 Qwen")
-                    if (qwenEngine == null) throw NoEngineException("Qwen 本地引擎未配置，且云端不可用")
-                    ensureInitializedOrThrow(context, qwenEngine!!)
-                    qwenEngine!!
+                    ensureInitializedOrThrow(context, dashScopeEngine!!)
+                    dashScopeEngine!!
                 } else {
-                    throw NoEngineException("DashScope Key 未配置，且自动降级已关闭")
+                    throw NoEngineException(
+                        "DashScope Key 未配置。请在「API 配置」页面设置 API Key。")
                 }
             }
 
@@ -230,14 +216,11 @@ class EngineRouter(
             openAiCompatEngines.containsKey(preferred) -> {
                 val engine = openAiCompatEngines.getValue(preferred)
                 if (prefs.hasLlmKey(preferred)) {
-                    ensureOrFallback(context, engine, qwenEngine!!, preferred.displayName)
-                } else if (prefs.autoFallback) {
-                    Log.w(TAG, "${preferred.displayName} Key 未配置 → 降级到 Qwen")
-                    if (qwenEngine == null) throw NoEngineException("Qwen 本地引擎未配置，且云端不可用")
-                    ensureInitializedOrThrow(context, qwenEngine!!)
-                    qwenEngine!!
+                    ensureInitializedOrThrow(context, engine)
+                    engine
                 } else {
-                    throw NoEngineException("${preferred.displayName} Key 未配置，且自动降级已关闭")
+                    throw NoEngineException(
+                        "${preferred.displayName} Key 未配置。请在「API 配置」页面设置。")
                 }
             }
 
@@ -282,39 +265,6 @@ class EngineRouter(
         ensureInitialized(context, engine).onFailure { e ->
             throw NoEngineException("${engine.type.displayName} 初始化失败: ${e.message}", e)
         }
-    }
-
-    /**
-     * 尝试初始化首选引擎，失败时若用户开启自动降级则回退到本地引擎。
-     */
-    private suspend fun ensureOrFallback(
-        context: Context,
-        primary: AsrEngine,
-        fallback: AsrEngine,
-        label: String
-    ): AsrEngine {
-        if (ensureInitialized(context, primary).isSuccess) return primary
-        if (!prefs.autoFallback) {
-            throw NoEngineException("${label} 初始化失败，且自动降级已关闭")
-        }
-        Log.w(TAG, "$label 初始化失败 → 降级到 ${fallback.type.displayName}")
-        ensureInitializedOrThrow(context, fallback)
-        return fallback
-    }
-
-    private suspend fun ensureOrFallback(
-        context: Context,
-        primary: LlmEngine,
-        fallback: LlmEngine,
-        label: String
-    ): LlmEngine {
-        if (ensureInitialized(context, primary).isSuccess) return primary
-        if (!prefs.autoFallback) {
-            throw NoEngineException("${label} 初始化失败，且自动降级已关闭")
-        }
-        Log.w(TAG, "$label 初始化失败 → 降级到 ${fallback.type.displayName}")
-        ensureInitializedOrThrow(context, fallback)
-        return fallback
     }
 
     private fun logRoute(kind: String, preferred: String, hasNetwork: Boolean) {

@@ -159,7 +159,7 @@ class OpenAiCompatEngine(
                     put("messages", JSONArray().apply {
                         put(JSONObject().apply {
                             put("role", "system")
-                            put("content", SYSTEM_PROMPT)
+                            put("content", PromptBuilder.SYSTEM_PROMPT)
                         })
                         put(JSONObject().apply {
                             put("role", "user")
@@ -179,8 +179,9 @@ class OpenAiCompatEngine(
 
                 _generationProgress.value = 0.5f
 
-                activeCall = client.newCall(request)
-                val response = activeCall!!.execute()
+                val call = client.newCall(request)
+                activeCall = call
+                val response = call.execute()
                 val responseBody = response.body?.string()
 
                 _generationProgress.value = 0.8f
@@ -245,6 +246,6 @@ class OpenAiCompatEngine(
         private const val TAG = "OpenAiCompatEngine"
         private const val MAX_TOKENS = 1000
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
-        private const val SYSTEM_PROMPT = "你是一位专业的会议纪要助手，输出清晰、结构化、可执行。"
+        // SYSTEM_PROMPT 已迁移至 PromptBuilder.SYSTEM_PROMPT
     }
 }

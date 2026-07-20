@@ -8,33 +8,165 @@
     android:orientation="vertical"
     android:background="@color/background">
 
-    <!-- 标题栏 -->
+    <!-- 标题栏 + 统计卡片（一体化头部） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:padding="16dp"
+        android:orientation="vertical"
         android:background="@color/surface"
-        android:elevation="2dp">
+        android:elevation="1dp"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="12dp">
 
-        <TextView
-            android:layout_width="0dp"
+        <!-- 标题行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="历史会议"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:textColor="@color/on_background" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
-        <Button
-            android:id="@+id/btn_recycle_bin"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="历史会议"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_background" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_recycle_bin"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="回收站"
+                android:textColor="@color/accent"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- 统计卡片行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="回收站"
-            android:textColor="@color/accent"
-            android:textSize="13sp" />
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:baselineAligned="false">
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                app:cardElevation="0dp"
+                app:cardCornerRadius="12dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/outline_variant">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:paddingVertical="10dp"
+                    android:paddingHorizontal="8dp">
+
+                    <TextView
+                        android:id="@+id/tv_meeting_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0"
+                        android:textSize="24sp"
+                        android:textColor="@color/primary"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="场会议"
+                        android:textSize="12sp"
+                        android:textColor="@color/on_surface_variant" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="3dp"
+                android:layout_marginEnd="3dp"
+                android:layout_weight="1"
+                app:cardElevation="0dp"
+                app:cardCornerRadius="12dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/outline_variant">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:paddingVertical="10dp"
+                    android:paddingHorizontal="8dp">
+
+                    <TextView
+                        android:id="@+id/tv_recording_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0"
+                        android:textSize="24sp"
+                        android:textColor="@color/primary"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tv_recording_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:maxLines="1"
+                        android:text="条录音"
+                        android:textSize="12sp"
+                        android:textColor="@color/on_surface_variant" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                app:cardElevation="0dp"
+                app:cardCornerRadius="12dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/outline_variant">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:paddingVertical="10dp"
+                    android:paddingHorizontal="8dp">
+
+                    <TextView
+                        android:id="@+id/tv_free_storage"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="--"
+                        android:textSize="24sp"
+                        android:textColor="@color/primary"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="GB 可用"
+                        android:textSize="12sp"
+                        android:textColor="@color/on_surface_variant" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- 搜索栏 -->
@@ -43,73 +175,99 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="6dp"
-        android:background="@color/surface">
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="6dp"
+        android:background="@color/background">
 
-        <EditText
-            android:id="@+id/et_search"
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="@drawable/search_bg"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:singleLine="true"
-            android:textSize="14sp"
             android:hint="搜索会议标题..."
-            android:maxLength="50"
-            android:drawableStart="@drawable/ic_search"
-            android:drawablePadding="8dp"
-            android:imeOptions="actionSearch" />
+            app:startIconDrawable="@drawable/ic_search"
+            app:startIconContentDescription="搜索"
+            app:endIconMode="clear_text"
+            app:boxCornerRadiusBottomStart="24dp"
+            app:boxCornerRadiusTopStart="24dp"
+            app:boxCornerRadiusBottomEnd="24dp"
+            app:boxCornerRadiusTopEnd="24dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_search"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:singleLine="true"
+                android:textSize="14sp"
+                android:maxLength="50"
+                android:imeOptions="actionSearch" />
+        </com.google.android.material.textfield.TextInputLayout>
     </LinearLayout>
 
-    <!-- 标签筛选 -->
-    <HorizontalScrollView
-        android:id="@+id/layout_tag_chips"
+    <!-- 分隔线 -->
+    <View
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:scrollbars="none"
-        android:paddingVertical="4dp"
-        android:paddingHorizontal="12dp"
-        android:background="@color/surface">
+        android:layout_height="1dp"
+        android:background="@color/outline_variant"
+        android:layout_marginHorizontal="16dp" />
 
-        <com.google.android.material.chip.ChipGroup
-            android:id="@+id/chip_group_tags"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            app:singleSelection="true"
-            app:selectionRequired="true"
-            app:checkedChip="@+id/chip_all" />
-    </HorizontalScrollView>
-
-    <!-- 空状态 -->
-    <TextView
-        android:id="@+id/tv_empty"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:text="暂无历史会议"
-        android:textSize="16sp"
-        android:textColor="@color/interim_text"
-        android:gravity="center"
-        android:visibility="gone"
-        tools:visibility="visible" />
-
-    <!-- 下拉刷新包裹 -->
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-        android:id="@+id/swipe_refresh"
+    <!-- 内容区：FrameLayout 叠放 RecyclerView 和空状态 -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rv_history"
+        <!-- 下拉刷新包裹 -->
+        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+            android:id="@+id/swipe_refresh"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_history"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp"
+                android:clipToPadding="false"
+                tools:listitem="@layout/item_meeting_history" />
+
+        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+        <!-- 空状态（叠放在 RecyclerView 上方，无数据时显示） -->
+        <LinearLayout
+            android:id="@+id/layout_empty"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="8dp"
-            tools:listitem="@layout/item_meeting_history" />
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone"
+            tools:visibility="visible">
 
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📭"
+                android:textSize="48sp" />
+
+            <TextView
+                android:id="@+id/tv_empty"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="暂无历史会议"
+                android:textSize="16sp"
+                android:textColor="@color/on_surface_variant" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="开始一场新会议吧"
+                android:textSize="13sp"
+                android:textColor="@color/interim_text" />
+        </LinearLayout>
+    </FrameLayout>
 
 </LinearLayout>

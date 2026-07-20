@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -8,23 +9,33 @@
     android:background="@color/background">
 
     <!-- 摘要风格选择 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="8dp"
+        android:text="摘要设置"
+        android:textSize="12sp"
+        android:textColor="@color/on_surface_variant"
+        android:letterSpacing="0.08"
+        android:textAllCaps="true" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:paddingHorizontal="16dp"
-        android:paddingVertical="10dp"
+        android:paddingVertical="12dp"
         android:gravity="center_vertical"
-        android:background="@color/surface"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="8dp">
+        android:background="@color/surface">
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="摘要风格"
-            android:textSize="14sp"
+            android:textSize="15sp"
             android:textColor="@color/on_background" />
 
         <Spinner
@@ -35,72 +46,43 @@
             android:paddingHorizontal="8dp" />
     </LinearLayout>
 
-    <!-- 清除模型缓存 -->
-    <LinearLayout
+    <View
         android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/outline_variant"
+        android:layout_marginHorizontal="16dp" />
+
+    <!-- 词库管理 -->
+    <TextView
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="10dp"
-        android:gravity="center_vertical"
-        android:background="@color/surface"
-        android:layout_marginBottom="1dp">
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="8dp"
+        android:text="词库管理"
+        android:textSize="12sp"
+        android:textColor="@color/on_surface_variant"
+        android:letterSpacing="0.08"
+        android:textAllCaps="true" />
 
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="本地模型缓存"
-                android:textSize="14sp"
-                android:textColor="@color/on_background" />
-
-            <TextView
-                android:id="@+id/tv_model_size"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:textColor="@color/interim_text"
-                android:layout_marginTop="2dp"
-                android:text="加载中..." />
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/btn_clear_model"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="清除"
-            android:textSize="12sp"
-            android:textColor="@color/accent" />
-    </LinearLayout>
-
-    <!-- ===== 旧 ASR 提供商选择（已移除，迁移至 API 配置页） ===== -->
-
-<LinearLayout
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:paddingHorizontal="16dp"
         android:paddingVertical="12dp"
         android:gravity="center_vertical"
-        android:background="@color/surface"
-        android:elevation="2dp">
+        android:background="@color/surface">
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="词库管理"
-            android:textSize="20sp"
-            android:textStyle="bold"
+            android:text="热词列表"
+            android:textSize="15sp"
             android:textColor="@color/on_background" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_add_vocabulary"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
@@ -108,7 +90,7 @@
             android:text="新建"
             android:textColor="@color/primary" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_import_vocabulary"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
@@ -117,38 +99,13 @@
             android:textColor="@color/primary" />
     </LinearLayout>
 
-    <!-- 后台静默运行 -->
-    <LinearLayout
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rv_vocabularies"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="8dp"
-        android:gravity="center_vertical"
-        android:background="@color/surface"
-        android:layout_marginTop="1dp">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="后台静默运行"
-            android:textSize="14sp"
-            android:textColor="@color/on_background" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="降低通知优先级，减少干扰"
-            android:textSize="11sp"
-            android:textColor="@color/interim_text"
-            android:layout_marginEnd="12dp" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/switch_background"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
-    </LinearLayout>
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="8dp"
+        android:clipToPadding="false" />
 
     <TextView
         android:id="@+id/tv_empty"
@@ -162,43 +119,110 @@
         android:visibility="gone"
         tools:visibility="visible" />
 
-    <!-- 云同步 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/outline_variant"
+        android:layout_marginHorizontal="16dp" />
+
+    <!-- 通用设置 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="8dp"
+        android:text="通用设置"
+        android:textSize="12sp"
+        android:textColor="@color/on_surface_variant"
+        android:letterSpacing="0.08"
+        android:textAllCaps="true" />
+
+    <!-- 后台静默运行 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:paddingHorizontal="16dp"
-        android:paddingVertical="10dp"
+        android:paddingVertical="12dp"
         android:gravity="center_vertical"
-        android:background="@color/surface"
-        android:layout_marginTop="1dp">
+        android:background="@color/surface">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="后台静默运行"
+                android:textSize="15sp"
+                android:textColor="@color/on_background" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="降低通知优先级，减少干扰"
+                android:textSize="12sp"
+                android:textColor="@color/on_surface_variant" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_background"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/outline_variant"
+        android:layout_marginHorizontal="16dp" />
+
+    <!-- 数据备份 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="12dp"
+        android:gravity="center_vertical"
+        android:background="@color/surface">
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="数据备份"
-            android:textSize="14sp"
+            android:textSize="15sp"
             android:textColor="@color/on_background" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_sync_export"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="导出"
-            android:textSize="12sp"
             android:textColor="@color/primary" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_sync_import"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="导入"
-            android:textSize="12sp"
             android:textColor="@color/accent" />
     </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/outline_variant"
+        android:layout_marginHorizontal="16dp" />
 
     <!-- 版本更新 -->
     <LinearLayout
@@ -208,8 +232,7 @@
         android:paddingHorizontal="16dp"
         android:paddingVertical="12dp"
         android:gravity="center_vertical"
-        android:background="@color/surface"
-        android:layout_marginTop="1dp">
+        android:background="@color/surface">
 
         <LinearLayout
             android:layout_width="0dp"
@@ -221,28 +244,33 @@
                 android:id="@+id/tv_version"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="13sp"
+                android:textSize="15sp"
                 android:textColor="@color/on_background" />
 
             <TextView
                 android:id="@+id/tv_update_status"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:textColor="@color/interim_text"
                 android:layout_marginTop="2dp"
+                android:textSize="12sp"
+                android:textColor="@color/on_surface_variant"
                 android:text="正在检查..." />
         </LinearLayout>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_check_update"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="检查更新"
-            android:textSize="12sp"
             android:textColor="@color/primary" />
     </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/outline_variant"
+        android:layout_marginHorizontal="16dp" />
 
     <!-- 存储空间 -->
     <LinearLayout
@@ -252,8 +280,7 @@
         android:paddingHorizontal="16dp"
         android:paddingVertical="12dp"
         android:gravity="center_vertical"
-        android:background="@color/surface"
-        android:layout_marginTop="1dp">
+        android:background="@color/surface">
 
         <LinearLayout
             android:layout_width="0dp"
@@ -262,39 +289,29 @@
             android:orientation="vertical">
 
             <TextView
-                android:id="@+id/tv_storage_info"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="13sp"
-                android:textColor="@color/on_background"
-                android:text="存储空间" />
+                android:text="存储空间"
+                android:textSize="15sp"
+                android:textColor="@color/on_background" />
 
             <TextView
                 android:id="@+id/tv_storage_detail"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:textColor="@color/interim_text"
                 android:layout_marginTop="2dp"
+                android:textSize="12sp"
+                android:textColor="@color/on_surface_variant"
                 android:text="加载中..." />
         </LinearLayout>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_cleanup"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="清理旧录音"
-            android:textSize="12sp"
             android:textColor="@color/accent" />
     </LinearLayout>
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rv_vocabularies"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:padding="8dp"
-        android:clipToPadding="false" />
 
 </LinearLayout>

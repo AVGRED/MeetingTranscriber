@@ -29,10 +29,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
 
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-        }
-
         // 阿里云通义听悟配置 (BuildConfig 常量)
         buildConfigField("String", "ALIYUN_ACCESS_KEY_ID", "\"${secret("ALIYUN_ACCESS_KEY_ID")}\"")
         buildConfigField("String", "ALIYUN_ACCESS_KEY_SECRET", "\"${secret("ALIYUN_ACCESS_KEY_SECRET")}\"")
@@ -44,14 +40,14 @@ android {
         buildConfigField("String", "ARK_API_KEY", "\"${secret("ARK_API_KEY")}\"")
         // 火山方舟推理端点 ID（如 ep-20250101123456-xxxxx）或模型名。优先使用此字段。
         buildConfigField("String", "ARK_ENDPOINT_ID", "\"${secret("ARK_ENDPOINT_ID")}\"")
-        // 兼容旧配置：若未设置 ARK_ENDPOINT_ID 则回退到此字段。
-        buildConfigField("String", "ARK_MODEL", "\"${secret("ARK_MODEL")}\"")
-        buildConfigField("String", "ARK_BASE_URL", "\"${secret("ARK_BASE_URL")}\"")
+        // FunASR 云端 WebSocket 地址（自部署服务器）
+        buildConfigField("String", "FUNASR_CLOUD_URL", "\"${secret("FUNASR_CLOUD_URL")}\"")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
@@ -78,15 +74,6 @@ android {
         noCompress("onnx")
     }
 
-    // === llama.cpp JNI NDK 编译 ===
-    // 依赖: cpp/llama.cpp (已 clone)
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
-    ndkVersion = "27.0.12077973"
 }
 
 dependencies {
@@ -102,15 +89,15 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.7")
 
     // --- UI ---
-    implementation("com.google.android.material:material:1.12.0")
+    implementation("com.google.android.material:material:1.13.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
     // --- Room 数据库 ---
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.7.0")
+    implementation("androidx.room:room-ktx:2.7.0")
+    ksp("androidx.room:room-compiler:2.7.0")
 
     // --- 网络 ---
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -123,12 +110,12 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
 
     // --- 加密 ---
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.security:security-crypto:1.1.0")
     implementation("net.zetetic:android-database-sqlcipher:4.5.4@aar")
     implementation("androidx.sqlite:sqlite:2.2.0")
 
     // --- 协程 ---
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // --- 局域网分享 ---
     implementation("com.google.zxing:core:3.5.3")      // 二维码位图生成（纯 Java，无需相机）

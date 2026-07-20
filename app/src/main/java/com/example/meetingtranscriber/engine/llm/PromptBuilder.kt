@@ -3,12 +3,12 @@ package com.example.meetingtranscriber.engine.llm
 import com.example.meetingtranscriber.engine.SummaryStyle
 
 /**
- * 共享的 Prompt 构建工具 — 消除 DashScopeEngine / DoubaoEngine 中重复的 buildPrompt()。
- *
- * QwenEngine 使用 Chat Template 格式（见 [QwenEngine.buildQwenPrompt]），
- * 因此不在此复用；云端引擎使用此共享实现。
+ * 共享的 Prompt 构建工具 — 供云端 LLM 引擎（DoubaoEngine / DashScopeEngine 等）使用。
  */
 object PromptBuilder {
+
+    /** 共享的系统提示词，供所有 LLM 引擎统一引用 */
+    const val SYSTEM_PROMPT = "你是一位专业的会议纪要助手，输出清晰、结构化、可执行。"
 
     /**
      * 构建云端 LLM 的通用 prompt。

@@ -61,12 +61,87 @@
                 android:layout_marginTop="2dp"
                 tools:text="45分30秒" />
 
+            <!-- 内容状态行：录音 · 纪要 · 转写条数 -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
                 android:orientation="horizontal"
-                android:layout_marginTop="4dp">
+                android:gravity="center_vertical">
 
+                <!-- 录音指示器 -->
+                <LinearLayout
+                    android:id="@+id/layout_has_recording"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <View
+                        android:id="@+id/indicator_recording_dot"
+                        android:layout_width="6dp"
+                        android:layout_height="6dp"
+                        android:background="@drawable/circle_indicator_recording" />
+
+                    <TextView
+                        android:id="@+id/indicator_recording_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:text="录音"
+                        android:textSize="12sp"
+                        android:textColor="@color/indicator_recording" />
+                </LinearLayout>
+
+                <!-- 分隔点 -->
+                <TextView
+                    android:id="@+id/tv_dot_1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=" · "
+                    android:textSize="12sp"
+                    android:textColor="@color/interim_text"
+                    android:visibility="gone" />
+
+                <!-- 纪要指示器 -->
+                <LinearLayout
+                    android:id="@+id/layout_has_summary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <View
+                        android:id="@+id/indicator_summary_dot"
+                        android:layout_width="6dp"
+                        android:layout_height="6dp"
+                        android:background="@drawable/circle_indicator_summary" />
+
+                    <TextView
+                        android:id="@+id/indicator_summary_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:text="纪要"
+                        android:textSize="12sp"
+                        android:textColor="@color/indicator_summary" />
+                </LinearLayout>
+
+                <!-- 分隔点 -->
+                <TextView
+                    android:id="@+id/tv_dot_2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=" · "
+                    android:textSize="12sp"
+                    android:textColor="@color/interim_text"
+                    android:visibility="gone" />
+
+                <!-- 转写记录数（始终显示） -->
                 <TextView
                     android:id="@+id/tv_speakers"
                     android:layout_width="wrap_content"
@@ -75,6 +150,7 @@
                     android:textColor="@color/interim_text"
                     tools:text="3 位说话人 · 128 条记录" />
 
+                <!-- 标签 -->
                 <TextView
                     android:id="@+id/tv_tag"
                     android:layout_width="wrap_content"

@@ -38,19 +38,25 @@ class PreferencesManager(context: Context) {
     // ASR API Key (加密存储)
     // ═══════════════════════════════════════════════════════
 
-    /** 通义听悟 AccessKey ID */
+    /** 通义听悟 AccessKey ID（用户未填时 fallback 到 BuildConfig 预置值） */
     var tingwuAccessKeyId: String
-        get() = securePrefs.getString(KEY_TINGWU_AK_ID, "") ?: ""
+        get() = securePrefs.getString(KEY_TINGWU_AK_ID, "")?.ifBlank {
+            BuildConfig.ALIYUN_ACCESS_KEY_ID
+        } ?: ""
         set(value) = securePrefs.edit().putString(KEY_TINGWU_AK_ID, value).apply()
 
-    /** 通义听悟 AccessKey Secret */
+    /** 通义听悟 AccessKey Secret（用户未填时 fallback 到 BuildConfig 预置值） */
     var tingwuAccessKeySecret: String
-        get() = securePrefs.getString(KEY_TINGWU_AK_SECRET, "") ?: ""
+        get() = securePrefs.getString(KEY_TINGWU_AK_SECRET, "")?.ifBlank {
+            BuildConfig.ALIYUN_ACCESS_KEY_SECRET
+        } ?: ""
         set(value) = securePrefs.edit().putString(KEY_TINGWU_AK_SECRET, value).apply()
 
-    /** 通义听悟 App Key */
+    /** 通义听悟 App Key（用户未填时 fallback 到 BuildConfig 预置值） */
     var tingwuAppKey: String
-        get() = securePrefs.getString(KEY_TINGWU_APP_KEY, "") ?: ""
+        get() = securePrefs.getString(KEY_TINGWU_APP_KEY, "")?.ifBlank {
+            BuildConfig.ALIYUN_TINGWU_APP_KEY
+        } ?: ""
         set(value) = securePrefs.edit().putString(KEY_TINGWU_APP_KEY, value).apply()
 
     /** 火山方舟 API Key（LLM） */
@@ -116,21 +122,21 @@ class PreferencesManager(context: Context) {
     // 引擎偏好 (明文存储)
     // ═══════════════════════════════════════════════════════
 
-    /** 首选 ASR 引擎 */
+    /** 首选 ASR 引擎（默认云端，无网络自动降级 sherpa-onnx 本地） */
     var preferredAsrEngine: AsrEngineType
         get() {
-            val name = plainPrefs.getString(KEY_ASR_ENGINE, AsrEngineType.FUNASR_LOCAL.name)
-                ?: AsrEngineType.FUNASR_LOCAL.name
-            return try { AsrEngineType.valueOf(name) } catch (_: Exception) { AsrEngineType.FUNASR_LOCAL }
+            val name = plainPrefs.getString(KEY_ASR_ENGINE, AsrEngineType.FUNASR_CLOUD.name)
+                ?: AsrEngineType.FUNASR_CLOUD.name
+            return try { AsrEngineType.valueOf(name) } catch (_: Exception) { AsrEngineType.FUNASR_CLOUD }
         }
         set(value) = plainPrefs.edit().putString(KEY_ASR_ENGINE, value.name).apply()
 
     /** 首选 LLM 引擎 */
     var preferredLlmEngine: LlmEngineType
         get() {
-            val name = plainPrefs.getString(KEY_LLM_ENGINE, LlmEngineType.QWEN_LOCAL.name)
-                ?: LlmEngineType.QWEN_LOCAL.name
-            return try { LlmEngineType.valueOf(name) } catch (_: Exception) { LlmEngineType.QWEN_LOCAL }
+            val name = plainPrefs.getString(KEY_LLM_ENGINE, LlmEngineType.DOUBAO_CLOUD.name)
+                ?: LlmEngineType.DOUBAO_CLOUD.name
+            return try { LlmEngineType.valueOf(name) } catch (_: Exception) { LlmEngineType.DOUBAO_CLOUD }
         }
         set(value) = plainPrefs.edit().putString(KEY_LLM_ENGINE, value.name).apply()
 
@@ -153,9 +159,11 @@ class PreferencesManager(context: Context) {
         get() = plainPrefs.getBoolean(KEY_BACKGROUND_SILENT, false)
         set(value) = plainPrefs.edit().putBoolean(KEY_BACKGROUND_SILENT, value).apply()
 
-    /** FunASR 云端服务器地址 (ws://host:port/) */
+    /** FunASR 云端服务器地址 (ws://host:port/)，用户未填时 fallback 到 BuildConfig 预置值 */
     var funasrCloudUrl: String
-        get() = plainPrefs.getString(KEY_FUNASR_CLOUD_URL, "") ?: ""
+        get() = plainPrefs.getString(KEY_FUNASR_CLOUD_URL, "")?.ifBlank {
+            BuildConfig.FUNASR_CLOUD_URL
+        } ?: ""
         set(value) = plainPrefs.edit().putString(KEY_FUNASR_CLOUD_URL, value).apply()
 
     // ═══════════════════════════════════════════════════════
@@ -172,6 +180,12 @@ class PreferencesManager(context: Context) {
 
     /** 火山方舟 API Key 是否已配置 */
     fun hasArkKey(): Boolean = arkApiKey.isNotBlank()
+
+    /** 解析火山方舟 API Key：用户填了就用，没填 fallback 到 BuildConfig 预置值 */
+    fun resolveArkApiKey(): String = arkApiKey.ifBlank { BuildConfig.ARK_API_KEY }
+
+    /** 解析火山方舟端点 ID：用户填了就用，没填 fallback 到 BuildConfig 预置值 */
+    fun resolveArkEndpointId(): String = arkEndpointId.ifBlank { BuildConfig.ARK_ENDPOINT_ID }
 
     /** DashScope API Key 是否已配置 */
     fun hasDashScopeKey(): Boolean = dashScopeApiKey.isNotBlank()

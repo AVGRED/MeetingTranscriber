@@ -43,7 +43,7 @@ class VolcengineEngine(
     override val type: AsrEngineType = AsrEngineType.VOLCENGINE_CLOUD
 
     // ── 内部状态 ──
-    private var webSocket: WebSocket? = null
+    @Volatile private var webSocket: WebSocket? = null
     private var connectId: String = ""
     private var sentenceCounter: Long = 0
 
@@ -100,8 +100,7 @@ class VolcengineEngine(
             connectId = UUID.randomUUID().toString()
             sentenceCounter = 0
             _interimText.value = ""
-            reconnectAttempts = 0
-            reconnectScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+            reconnectHandler.reset()
             reconnectConfig = config
 
             _engineStatus.value = EngineStatus(EngineState.LOADING, "正在连接豆包 ASR...")
@@ -129,7 +128,7 @@ class VolcengineEngine(
             }
         } else {
             // 未连接 → 缓冲（先内存，满了落盘）
-            if (audioBuffer.size < MAX_BUFFER_SIZE) {
+            if (audioBuffer.size < EngineConstants.MAX_BUFFER_FRAMES) {
                 audioBuffer.offer(pcmData.copyOf())
             } else {
                 writeToOverflowFile(pcmData)
@@ -137,7 +136,7 @@ class VolcengineEngine(
         }
     }
 
-    override fun finalize() {
+    override suspend fun finalize() {
         try {
             sendAudioLastFrame()
             webSocket?.close(1000, "用户结束会议")
@@ -151,10 +150,8 @@ class VolcengineEngine(
     }
 
     override suspend fun dispose() {
-        reconnectAttempts = MAX_RECONNECT_ATTEMPTS // 阻止重连
+        reconnectHandler.cancel()
         reconnectConfig = null
-        reconnectScope?.cancel()
-        reconnectScope = null
         try {
             webSocket?.close(1000, "引擎释放")
         } catch (_: Exception) {}
@@ -170,9 +167,8 @@ class VolcengineEngine(
     // WebSocket 管理 + 重连
     // ═══════════════════════════════════════════════════════════
 
-    @Volatile private var reconnectAttempts = 0
-    private var reconnectScope: CoroutineScope? = null
-    private var reconnectConfig: AsrConfig? = null
+    private val reconnectHandler = ReconnectHandler(TAG)
+    @Volatile private var reconnectConfig: AsrConfig? = null
 
     private fun openWebSocket(config: AsrConfig) {
         val languageCode = if (config.language == "cn") "zh-CN" else config.language
@@ -203,7 +199,7 @@ class VolcengineEngine(
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "WebSocket 已连接, status=${response.code}")
-                reconnectAttempts = 0
+                reconnectHandler.reset()
                 sendFullClientRequest(languageCode)
                 flushBuffer()
             }
@@ -251,22 +247,17 @@ class VolcengineEngine(
     }
 
     private fun scheduleReconnect() {
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.e(TAG, "已达最大重连次数 ($MAX_RECONNECT_ATTEMPTS)，放弃重连")
+        val config = reconnectConfig ?: return
+
+        if (reconnectHandler.isExhausted) {
+            Log.e(TAG, "已达最大重连次数，放弃重连")
             audioBuffer.clear()
-            _engineStatus.value = EngineStatus(EngineState.ERROR, "连接失败，已重试 $reconnectAttempts 次")
+            _engineStatus.value = EngineStatus(EngineState.ERROR, "连接失败，已重试 ${EngineConstants.MAX_RECONNECT_ATTEMPTS} 次")
             return
         }
 
-        reconnectAttempts++
-        val delay = (RECONNECT_BASE_DELAY_MS * reconnectAttempts).coerceAtMost(RECONNECT_MAX_DELAY_MS)
-        Log.i(TAG, "将在 ${delay}ms 后尝试第 $reconnectAttempts 次重连...")
-        _engineStatus.value = EngineStatus(EngineState.LOADING, "正在重连 ($reconnectAttempts/$MAX_RECONNECT_ATTEMPTS)...")
-
-        val config = reconnectConfig ?: return
-
-        reconnectScope?.launch {
-            delay(delay)
+        reconnectHandler.start { attempt ->
+            _engineStatus.value = EngineStatus(EngineState.LOADING, "正在重连 ($attempt/${EngineConstants.MAX_RECONNECT_ATTEMPTS})...")
             openWebSocket(config)
         }
     }
@@ -376,11 +367,11 @@ class VolcengineEngine(
         overflowFile?.let { file ->
             try {
                 FileInputStream(file).use { fis ->
-                    val buffer = ByteArray(AUDIO_FRAME_SIZE)
+                    val buffer = ByteArray(EngineConstants.AUDIO_FRAME_SIZE)
                     while (true) {
                         val read = fis.read(buffer)
                         if (read <= 0) break
-                        val chunk = if (read == AUDIO_FRAME_SIZE) buffer.copyOf()
+                        val chunk = if (read == EngineConstants.AUDIO_FRAME_SIZE) buffer.copyOf()
                         else buffer.copyOfRange(0, read)
                         try {
                             val frame = buildFrame(MSG_AUDIO_ONLY, FLAG_RAW, chunk)
@@ -574,8 +565,7 @@ class VolcengineEngine(
         private const val RESOURCE_ID = "volc.seedasr.sauc.duration"
 
         // 缓冲
-        private const val MAX_BUFFER_SIZE = 1200
-        private const val AUDIO_FRAME_SIZE = 3200
+        // 共享常量已迁移至 EngineConstants
 
         // 二进制帧
         private const val MSG_FULL_REQUEST: Byte = 0x11.toByte()
@@ -591,9 +581,6 @@ class VolcengineEngine(
         private const val HEADER_SIZE = 4
         private const val PROTOCOL_VERSION: Byte = 0x01
 
-        /** WebSocket 重连配置 */
-        private const val MAX_RECONNECT_ATTEMPTS = 5
-        private const val RECONNECT_BASE_DELAY_MS = 1000L
-        private const val RECONNECT_MAX_DELAY_MS = 15000L
+        /** WebSocket 重连配置 — 已迁移至 EngineConstants */
     }
 }

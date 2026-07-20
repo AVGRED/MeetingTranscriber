@@ -165,39 +165,6 @@ class WavRecorder(
     // ── WAV 头 ──
 
     private fun writeWavHeader(raf: RandomAccessFile, dataSize: Int) {
-        val byteRate = SAMPLE_RATE * CHANNELS * BITS_PER_SAMPLE / 8
-        val blockAlign = CHANNELS * BITS_PER_SAMPLE / 8
-        val buf = ByteBuffer.allocate(44).apply { order(ByteOrder.LITTLE_ENDIAN) }
-
-        buf.put('R'.code.toByte())
-        buf.put('I'.code.toByte())
-        buf.put('F'.code.toByte())
-        buf.put('F'.code.toByte())
-        buf.putInt(36 + dataSize)
-
-        buf.put('W'.code.toByte())
-        buf.put('A'.code.toByte())
-        buf.put('V'.code.toByte())
-        buf.put('E'.code.toByte())
-
-        buf.put('f'.code.toByte())
-        buf.put('m'.code.toByte())
-        buf.put('t'.code.toByte())
-        buf.put(' '.code.toByte())
-        buf.putInt(16)
-        buf.putShort(1)
-        buf.putShort(CHANNELS.toShort())
-        buf.putInt(SAMPLE_RATE)
-        buf.putInt(byteRate)
-        buf.putShort(blockAlign.toShort())
-        buf.putShort(BITS_PER_SAMPLE.toShort())
-
-        buf.put('d'.code.toByte())
-        buf.put('a'.code.toByte())
-        buf.put('t'.code.toByte())
-        buf.put('a'.code.toByte())
-        buf.putInt(dataSize)
-
-        raf.write(buf.array())
+        raf.write(WavHeaderBuilder.buildHeader(dataSize))
     }
 }

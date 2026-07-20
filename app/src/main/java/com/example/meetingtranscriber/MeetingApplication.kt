@@ -9,7 +9,10 @@ import com.example.meetingtranscriber.data.db.AppDatabase
 import com.example.meetingtranscriber.data.db.RecoveryStateEntity
 import com.example.meetingtranscriber.engine.EngineRouter
 import com.example.meetingtranscriber.engine.asr.*
-import com.example.meetingtranscriber.engine.llm.*
+import com.example.meetingtranscriber.engine.llm.DoubaoEngine
+import com.example.meetingtranscriber.engine.llm.DashScopeEngine
+import com.example.meetingtranscriber.engine.llm.OpenAiCompatEngine
+import com.example.meetingtranscriber.engine.llm.OpenAiCompatProvider
 import com.example.meetingtranscriber.network.UpdateChecker
 import com.example.meetingtranscriber.security.CryptoManager
 import com.example.meetingtranscriber.util.StorageMonitor
@@ -47,7 +50,6 @@ class MeetingApplication : Application() {
                 com.example.meetingtranscriber.engine.AsrEngineType.TENCENT_CLOUD to TencentAsrEngine(prefs),
                 com.example.meetingtranscriber.engine.AsrEngineType.BAIDU_CLOUD to BaiduAsrEngine(prefs)
             ),
-            qwenEngine = QwenEngine(this),
             doubaoEngine = DoubaoEngine(prefs),
             dashScopeEngine = DashScopeEngine(prefs),
             openAiCompatEngines = OpenAiCompatProvider.entries.associate {
@@ -75,7 +77,6 @@ class MeetingApplication : Application() {
                 funAsrLocal.initialize(this@MeetingApplication)
             }
             cleanupExpiredRecordings()
-            cleanupLegacyAsrModelCopy()
             AudioCacheManager.trim(this@MeetingApplication)
             StorageMonitor.maybeNotify(this@MeetingApplication)
             val info = UpdateChecker.check(this@MeetingApplication)
@@ -138,16 +139,4 @@ class MeetingApplication : Application() {
         }
     }
 
-    /** ASR 已改为 assets 直读，删除旧版拷到 filesDir 的 237MB 模型副本（一次性回收）。
-     *  只删 ASR 两个文件——同目录 models/ 还存放 Qwen gguf，不能整目录删 */
-    private fun cleanupLegacyAsrModelCopy() {
-        val dir = java.io.File(filesDir, FunAsrEngine.MODEL_DIR)
-        listOf(FunAsrEngine.MODEL_FILE_NAME, FunAsrEngine.TOKENS_FILE_NAME).forEach { name ->
-            val f = java.io.File(dir, name)
-            if (f.exists() && f.delete()) {
-                Log.i("MeetingApplication", "已清理遗留 ASR 模型副本: $name")
-            }
-            java.io.File(dir, "$name.tmp").delete()
-        }
-    }
 }

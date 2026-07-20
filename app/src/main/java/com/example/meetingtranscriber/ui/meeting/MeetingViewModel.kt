@@ -64,6 +64,8 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     private val _segments = MutableStateFlow<List<TranscriptSegment>>(emptyList())
     val segments: StateFlow<List<TranscriptSegment>> = _segments.asStateFlow()
 
+    /** 防止快速双击导致重复启动会议 */
+    @Volatile private var isStartingMeeting = false
     private var currentMeetingId: Long = 0
     private val speakerLabelMap = mutableMapOf<String, String>()
     private var meetingStartTime = 0L
@@ -229,14 +231,14 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     fun startMeeting(
         title: String = "会议_${System.currentTimeMillis()}",
         language: String = "cn",
-        tag: String? = null,
         engineTypeOverride: com.example.meetingtranscriber.engine.AsrEngineType? = null
     ) {
         // 防止快速双击导致重复启动
-        if (_uiState.value.isMeetingActive) {
-            android.util.Log.w("MeetingViewModel", "会议已在进行中，忽略重复 startMeeting")
+        if (_uiState.value.isMeetingActive || isStartingMeeting) {
+            android.util.Log.w("MeetingViewModel", "会议已在进行中或正在启动，忽略重复 startMeeting")
             return
         }
+        isStartingMeeting = true
         viewModelScope.launch {
             // 本次启动已创建的会议行 id（失败回滚用；不能用 currentMeetingId 判断——
             // 它可能残留上一场会议的 id）
@@ -257,7 +259,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 currentMeetingTitle = title.ifBlank { "会议" }
-                currentMeetingId = meetingRepository.createMeeting(title, tag)
+                currentMeetingId = meetingRepository.createMeeting(title)
                 createdMeetingId = currentMeetingId
                 meetingStartTime = System.currentTimeMillis()
 
@@ -310,6 +312,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 ) }
                 startTimer()
                 startRecoverySaver()
+                isStartingMeeting = false
             } catch (e: Exception) {
                 android.util.Log.e("MeetingViewModel", "startMeeting 异常: ${e.message}", e)
                 _uiState.update { it.copy(errorMessage = "启动会议失败: ${e.message}") }
@@ -324,6 +327,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
      * 已创建的空会议行。保证失败后可干净重试。
      */
     private suspend fun abortStartup(createdMeetingId: Long) {
+        isStartingMeeting = false
         try { audioCaptureManager.stop() } catch (_: Exception) {}
         try { wavRecorder?.cancel() } catch (_: Exception) {}
         wavRecorder = null
@@ -405,8 +409,8 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             }
             transcriptionUseCase.stop()
 
-            // 内存编排：会议已结束，声纹模型（27MB）无用武之地，先释放——
-            // 纪要若走本地 Qwen 要加载 1.1GB，8GB 设备须先腾内存；
+            // 内存编排：会议已结束，声纹模型（27MB）无用武之地，先释放；
+            // 纪要若走云端 LLM 无需本地内存开销；
             // 下次 startMeeting 会重新 initialize（<300ms）
             if (voiceprintEnabled) voiceprint.releaseModel()
 
@@ -447,6 +451,100 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    /** 关闭纪要审核弹窗 */
+    fun dismissSummaryReview() {
+        _uiState.update { it.copy(showSummaryReviewDialog = false) }
+    }
+
+    /** 保存用户在弹窗中编辑的纪要 */
+    fun saveSummaryForReview(text: String) {
+        val id = _uiState.value.summaryMeetingId
+        if (id == 0L || text.isBlank()) return
+        viewModelScope.launch {
+            meetingRepository.saveSummary(id, text)
+            _uiState.update { it.copy(latestSummary = text) }
+        }
+    }
+
+    /** 获取 segments 供外部（弹窗导出）使用 */
+    fun getSegmentsForSummary(): Long {
+        return _uiState.value.summaryMeetingId
+    }
+
+    /** 导出纪要文本到文件并触发系统分享 */
+    fun exportSummaryToFile(context: android.content.Context, summary: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val app = getApplication<MeetingApplication>()
+                val dir = java.io.File(app.getExternalFilesDir(null), "exports")
+                dir.mkdirs()
+                val dateStr = java.text.SimpleDateFormat(
+                    "yyyy-MM-dd_HHmm", java.util.Locale.getDefault()
+                ).format(java.util.Date())
+                val file = java.io.File(dir, "纪要_${dateStr}.txt")
+                file.writeText(summary, Charsets.UTF_8)
+
+                withContext(Dispatchers.Main) {
+                    com.example.meetingtranscriber.ui.export.ExportHelper.shareFile(
+                        context, file, "text/plain"
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MeetingViewModel", "纪要导出失败: ${e.message}")
+            }
+        }
+    }
+
+    /** 重新生成摘要（从审核弹窗触发，会直接更新弹窗中的文本） */
+    fun regenerateSummaryForReview() {
+        val id = _uiState.value.summaryMeetingId
+        if (id == 0L || _uiState.value.isGeneratingSummary) return
+        viewModelScope.launch {
+            var progressJob: Job? = null
+            try {
+                val segments = transcriptRepository.getSegmentsOnce(id)
+                if (segments.isEmpty()) {
+                    _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 0f) }
+                    return@launch
+                }
+                _uiState.update { it.copy(isGeneratingSummary = true, summaryProgress = 0f) }
+
+                progressJob = launch {
+                    summaryUseCase.generationProgress.collect { progress ->
+                        _uiState.update { it.copy(summaryProgress = progress) }
+                    }
+                }
+
+                val fullText = segments.joinToString("\n") {
+                    "${it.displaySpeaker} [${it.formattedTime}]: ${it.text}"
+                }
+                val summary = summaryUseCase.generate(
+                    getApplication(), fullText, com.example.meetingtranscriber.engine.SummaryStyle.STANDARD
+                ).getOrElse {
+                    MeetingSummaryGenerator.generate(fullText)
+                }
+                meetingRepository.saveSummary(id, summary)
+                _uiState.update { it.copy(
+                    isGeneratingSummary = false,
+                    summaryProgress = 1f,
+                    latestSummary = summary,
+                    showSummaryReviewDialog = true
+                ) }
+            } catch (e: Exception) {
+                android.util.Log.w("MeetingViewModel", "重新生成纪要失败: ${e.message}")
+                _uiState.update { it.copy(
+                    isGeneratingSummary = false,
+                    summaryProgress = 0f,
+                    showSummaryReviewDialog = true,
+                    errorMessage = "重新生成失败: ${e.message}"
+                ) }
+            } finally {
+                progressJob?.cancel()
+                try { summaryUseCase.dispose() } catch (_: Exception) {}
+            }
+        }
     }
 
     /** 声纹尚未出结果时沿用的最近已识别身份（首轮兜底"会议人1"） */
@@ -575,9 +673,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 val summary = summaryUseCase.generate(
                     getApplication(), fullText, com.example.meetingtranscriber.engine.SummaryStyle.STANDARD
                 ).getOrElse {
-                    // Fallback: 所有云端 LLM 不可用且 Qwen 模型未下载时，
-                    // 回退到内置规则生成器。删除时机：Qwen 模型覆盖 >90% 用户后。
-                    @Suppress("DEPRECATION")
+                    // Fallback: 所有云端 LLM 不可用时，回退到内置规则生成器
                     MeetingSummaryGenerator.generate(fullText)
                 }
                 meetingRepository.saveSummary(meeting.id, summary)
@@ -587,15 +683,20 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                     saveSummaryToFile(meeting, segments, summary)
                 }
 
-                _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 1f) }
+                _uiState.update { it.copy(
+                    isGeneratingSummary = false,
+                    summaryProgress = 1f,
+                    showSummaryReviewDialog = true,
+                    latestSummary = summary,
+                    summaryMeetingId = meeting.id
+                ) }
             } catch (e: Exception) {
                 android.util.Log.w("MeetingViewModel", "纪要生成失败: ${e.message}")
                 _uiState.update { it.copy(isGeneratingSummary = false, summaryProgress = 0f) }
             } finally {
                 // 进度收集协程在 finally 统一取消（原先异常路径不取消 → 协程泄漏）
                 progressJob?.cancel()
-                // 内存编排：本地 Qwen 用完立即卸载（1.1GB mmap 不能常驻 8GB 设备；
-                // 云端引擎 dispose 是轻量清理）。同会话再次生成会重载模型（数秒）
+                // 云端引擎 dispose 是轻量清理，释放连接和缓存。
                 try {
                     summaryUseCase.dispose()
                 } catch (e: Exception) {

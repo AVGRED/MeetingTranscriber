@@ -1,6 +1,7 @@
 package com.example.meetingtranscriber.ui.meeting
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -9,6 +10,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -75,25 +77,11 @@ class MeetingFragment : Fragment() {
         )
         languageAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerLanguage.adapter = languageAdapter
-
-        val tagAdapter = ArrayAdapter(
-            requireContext(),
-            android.R.layout.simple_spinner_item,
-            listOf("无标签", "产品", "技术", "客户", "人事", "其他")
-        )
-        tagAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerTag.adapter = tagAdapter
     }
 
     private fun getSelectedLanguage(): String {
         val pos = binding.spinnerLanguage.selectedItemPosition
         return SUPPORTED_LANGUAGES.getOrElse(pos) { SUPPORTED_LANGUAGES[0] }.code
-    }
-
-    private fun getSelectedTag(): String? {
-        val pos = binding.spinnerTag.selectedItemPosition
-        val tags = listOf(null, "产品", "技术", "客户", "人事", "其他")
-        return tags.getOrElse(pos) { null }
     }
 
     private fun setupRecyclerView() {
@@ -168,12 +156,11 @@ class MeetingFragment : Fragment() {
         }
         val title = binding.etMeetingTitle.text.toString().trim().ifBlank { "会议" }
         val language = getSelectedLanguage()
-        val tag = getSelectedTag()
         when (mode) {
-            StartMode.ONLINE -> viewModel.startMeeting(title, language, tag)
+            StartMode.ONLINE -> viewModel.startMeeting(title, language)
             StartMode.OFFLINE -> viewModel.startMeeting(
-                title, language, tag,
-                com.example.meetingtranscriber.engine.AsrEngineType.FUNASR_LOCAL
+                title, language,
+                engineTypeOverride = com.example.meetingtranscriber.engine.AsrEngineType.FUNASR_LOCAL
             )
         }
     }
@@ -189,7 +176,7 @@ class MeetingFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
                 launch {
                     viewModel.segments.collectLatest { segments ->
-                        adapter.submitSegments(segments) {
+                        adapter.submitSegments(segments, isLive = true) {
                             // 仅当已停在底部时跳到最新（无动画）：不打断往回翻看，
                             // 也避免每句 final 都触发平滑滚动动画
                             if (segments.isNotEmpty() && !binding.rvTranscript.canScrollVertically(1)) {
@@ -217,6 +204,18 @@ class MeetingFragment : Fragment() {
                         .map { it.copy(interimText = "", elapsedSeconds = 0) }
                         .distinctUntilChanged()
                         .collect { updateUI(it) }
+                }
+                // ── 纪要审核弹窗 ──
+                launch {
+                    viewModel.uiState
+                        .map { it.showSummaryReviewDialog to it }
+                        .distinctUntilChanged { old, new -> old.first == new.first &&
+                            old.second.latestSummary == new.second.latestSummary }
+                        .collect { (_, state) ->
+                            if (state.showSummaryReviewDialog) {
+                                showSummaryReviewDialog(state)
+                            }
+                        }
                 }
             }
         }
@@ -317,6 +316,52 @@ class MeetingFragment : Fragment() {
             binding.tvError.visibility = View.GONE
             binding.tvError.text = ""
             binding.tvError.setOnClickListener(null)
+        }
+    }
+
+    /**
+     * 会议结束后的纪要审核弹窗：
+     * 展示 AI 生成的纪要，支持编辑/保存/重新生成/导出。
+     */
+    private fun showSummaryReviewDialog(state: MeetingUiState) {
+        if (!state.showSummaryReviewDialog || state.latestSummary.isBlank()) return
+
+        val ctx = requireContext()
+        val editText = EditText(ctx).apply {
+            setText(state.latestSummary)
+            minLines = 10
+            setHorizontallyScrolling(false)
+            isVerticalScrollBarEnabled = true
+            setPadding(32, 24, 32, 24)
+            textSize = 14f
+        }
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setTitle("会议纪要")
+            .setView(editText)
+            .setPositiveButton("保存") { _, _ ->
+                viewModel.saveSummaryForReview(editText.text.toString())
+                Toast.makeText(ctx, "纪要已保存", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("重新生成", null)
+            .setNegativeButton("导出纪要") { _, _ ->
+                viewModel.saveSummaryForReview(editText.text.toString())
+                viewModel.exportSummaryToFile(ctx, editText.text.toString())
+            }
+            .setOnDismissListener {
+                // 旋转屏幕等配置变更会自动关闭弹窗——此时不标记为"已审核"，重建后重新弹出
+                if (activity?.isChangingConfigurations != true) {
+                    viewModel.dismissSummaryReview()
+                }
+            }
+            .create()
+
+        dialog.show()
+
+        // "重新生成"点击后先关闭弹窗，再生完成后会重新弹出
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+            viewModel.regenerateSummaryForReview()
+            dialog.dismiss()
         }
     }
 

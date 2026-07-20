@@ -18,7 +18,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.meetingtranscriber.data.db.VocabularyEntity
 import com.example.meetingtranscriber.databinding.FragmentSettingsBinding
 import com.example.meetingtranscriber.engine.SummaryStyle
-import com.example.meetingtranscriber.engine.llm.ModelDownloadManager
 import com.example.meetingtranscriber.network.CloudSyncManager
 import com.example.meetingtranscriber.network.UpdateChecker
 import com.example.meetingtranscriber.util.StorageMonitor
@@ -46,28 +45,6 @@ class SettingsFragment : Fragment() {
 
         // ── 摘要风格选择 ──
         setupSummaryStyleSpinner()
-
-        // ── 模型缓存信息 ──
-        updateModelSize()
-        binding.btnClearModel.setOnClickListener {
-            val manager = ModelDownloadManager(requireContext())
-            if (manager.isModelDownloaded()) {
-                AlertDialog.Builder(requireContext())
-                    .setTitle("清除模型缓存")
-                    .setMessage("删除本地 Qwen LLM 模型（约 1.1GB），再次使用时需重新下载。确定继续？")
-                    .setPositiveButton("清除") { _, _ ->
-                        val deleted = manager.deleteModel()
-                        Toast.makeText(requireContext(),
-                            if (deleted) "模型已清除" else "清除失败",
-                            Toast.LENGTH_SHORT).show()
-                        updateModelSize()
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
-            } else {
-                Toast.makeText(requireContext(), "没有已下载的模型", Toast.LENGTH_SHORT).show()
-            }
-        }
 
         adapter = VocabularyAdapter(
             onDelete = { vocab -> showDeleteConfirm(vocab) }
@@ -295,19 +272,6 @@ class SettingsFragment : Fragment() {
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-    }
-
-    /** 更新模型缓存大小显示 */
-    private fun updateModelSize() {
-        val manager = ModelDownloadManager(requireContext())
-        if (manager.isModelDownloaded()) {
-            val sizeMB = manager.modelFile.length() / (1024 * 1024)
-            binding.tvModelSize.text = "Qwen 模型已下载 · ${sizeMB}MB"
-            binding.btnClearModel.isEnabled = true
-        } else {
-            binding.tvModelSize.text = "无已下载的模型"
-            binding.btnClearModel.isEnabled = false
         }
     }
 

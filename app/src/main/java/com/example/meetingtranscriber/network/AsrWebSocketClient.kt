@@ -2,6 +2,7 @@ package com.example.meetingtranscriber.network
 
 import android.util.Log
 import com.example.meetingtranscriber.MeetingApplication
+import com.example.meetingtranscriber.engine.EngineConstants
 import kotlinx.coroutines.*
 import okhttp3.*
 import okio.ByteString
@@ -24,10 +25,9 @@ class AsrWebSocketClient {
 
     companion object {
         private const val TAG = "AsrWebSocketClient"
-        private const val MAX_RECONNECT_ATTEMPTS = 5
+        /** 通义听悟重连间隔：2000ms 固定延迟（区别于其他引擎的指数退避 1000ms） */
         private const val RECONNECT_DELAY_MS = 2000L
-        private const val MAX_BUFFER_SIZE = 1200  // 约 120 秒音频
-        private const val AUDIO_FRAME_SIZE = 3200  // 100ms @ 16kHz/16bit/mono
+        // MAX_RECONNECT_ATTEMPTS / MAX_BUFFER_SIZE / EngineConstants.AUDIO_FRAME_SIZE → EngineConstants
     }
 
     var onInterimResult: ((String) -> Unit)? = null
@@ -35,7 +35,7 @@ class AsrWebSocketClient {
     var onConnectionStateChanged: ((ConnectionState) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
-    private var webSocket: WebSocket? = null
+    @Volatile private var webSocket: WebSocket? = null
     private var taskId: String? = null
     @Volatile private var reconnectAttempts = 0
     private var shouldReconnect = true
@@ -98,7 +98,7 @@ class AsrWebSocketClient {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "WebSocket 已关闭: $code $reason")
                 // 非正常关闭时尝试重连
-                if (code != 1000 && shouldReconnect && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                if (code != 1000 && shouldReconnect && reconnectAttempts < EngineConstants.MAX_RECONNECT_ATTEMPTS) {
                     reconnectAttempts++
                     updateState(ConnectionState.RECONNECTING)
                     scope.launch {
@@ -113,7 +113,7 @@ class AsrWebSocketClient {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket 连接失败: ${t.message}")
-                if (shouldReconnect && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                if (shouldReconnect && reconnectAttempts < EngineConstants.MAX_RECONNECT_ATTEMPTS) {
                     reconnectAttempts++
                     updateState(ConnectionState.RECONNECTING)
                     scope.launch {
@@ -138,7 +138,7 @@ class AsrWebSocketClient {
                 Log.w(TAG, "发送音频失败: ${e.message}")
             }
         } else if (shouldReconnect) {
-            if (audioBuffer.size < MAX_BUFFER_SIZE) {
+            if (audioBuffer.size < EngineConstants.MAX_BUFFER_FRAMES) {
                 audioBuffer.offer(pcmData.copyOf())
             } else {
                 writeToOverflowFile(pcmData)
@@ -177,11 +177,11 @@ class AsrWebSocketClient {
         overflowFile?.let { file ->
             try {
                 FileInputStream(file).use { fis ->
-                    val buffer = ByteArray(AUDIO_FRAME_SIZE)
+                    val buffer = ByteArray(EngineConstants.AUDIO_FRAME_SIZE)
                     while (true) {
                         val read = fis.read(buffer)
                         if (read <= 0) break
-                        val frame = if (read == AUDIO_FRAME_SIZE) buffer.copyOf()
+                        val frame = if (read == EngineConstants.AUDIO_FRAME_SIZE) buffer.copyOf()
                         else buffer.copyOfRange(0, read)
                         try { webSocket?.send(ByteString.of(*frame)); sent++ }
                         catch (e: Exception) { Log.w(TAG, "溢出帧发送失败: ${e.message}"); break }
@@ -191,8 +191,10 @@ class AsrWebSocketClient {
                 overflowFrameCount = 0
             } catch (e: Exception) { Log.w(TAG, "读取溢出文件失败: ${e.message}") }
         }
-        overflowFile = null
+        // 溢出文件读取完毕，关闭写流再删除
+        try { overflowOutputStream?.close() } catch (_: Exception) {}
         overflowOutputStream = null
+        overflowFile = null
         if (sent > 0) Log.i(TAG, "已重发 $sent 帧缓冲音频")
     }
 

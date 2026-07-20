@@ -40,7 +40,7 @@ class FunAsrCloudEngine(
 
     override val type: AsrEngineType = AsrEngineType.FUNASR_CLOUD
 
-    private var webSocket: WebSocket? = null
+    @Volatile private var webSocket: WebSocket? = null
     private var sentenceCounter: Long = 0
 
     private val audioBuffer = ConcurrentLinkedQueue<ByteArray>()
@@ -104,7 +104,7 @@ class FunAsrCloudEngine(
             _interimText.value = ""
             _engineStatus.value = EngineStatus(EngineState.LOADING, "正在连接 FunASR 云端...")
 
-            reconnectScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+            reconnectHandler.reset()
             openWebSocket(serverUrl, config)
             _engineStatus.value = EngineStatus(EngineState.RUNNING)
             Result.success(Unit)
@@ -126,7 +126,7 @@ class FunAsrCloudEngine(
             }
         } else {
             // 缓冲直到 WebSocket 就绪
-            if (audioBuffer.size < MAX_BUFFER_SIZE) {
+            if (audioBuffer.size < EngineConstants.MAX_BUFFER_FRAMES) {
                 audioBuffer.offer(pcmData.copyOf())
             } else {
                 writeToOverflowFile(pcmData)
@@ -134,7 +134,7 @@ class FunAsrCloudEngine(
         }
     }
 
-    override fun finalize() {
+    override suspend fun finalize() {
         try {
             // FunASR 协议：发送文本结束标记
             webSocket?.send("{ \"is_speaking\": false }")
@@ -149,11 +149,9 @@ class FunAsrCloudEngine(
     }
 
     override suspend fun dispose() {
-        reconnectAttempts = MAX_RECONNECT_ATTEMPTS // 阻止重连
+        reconnectHandler.cancel()
         reconnectUrl = null
         reconnectConfig = null
-        reconnectScope?.cancel()
-        reconnectScope = null
         try {
             webSocket?.close(1000, "引擎释放")
         } catch (_: Exception) {}
@@ -169,15 +167,14 @@ class FunAsrCloudEngine(
     // WebSocket 管理
     // ═══════════════════════════════════════════════════════════
 
-    @Volatile private var reconnectAttempts = 0
-    private var reconnectScope: CoroutineScope? = null
-    private var reconnectConfig: AsrConfig? = null
-    private var reconnectUrl: String? = null
+    private val reconnectHandler = ReconnectHandler(TAG)
+    @Volatile private var reconnectConfig: AsrConfig? = null
+    @Volatile private var reconnectUrl: String? = null
 
     private fun openWebSocket(serverUrl: String, config: AsrConfig) {
         reconnectUrl = serverUrl
         reconnectConfig = config
-        reconnectAttempts = 0
+        reconnectHandler.reset()
 
         doConnect(serverUrl, config)
     }
@@ -193,7 +190,7 @@ class FunAsrCloudEngine(
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "FunASR 云端 WebSocket 已连接")
-                reconnectAttempts = 0
+                reconnectHandler.reset()
                 // 发送初始配置（可选：部分 FunASR 服务端支持）
                 val initMsg = JSONObject().apply {
                     put("mode", "2pass")
@@ -251,23 +248,18 @@ class FunAsrCloudEngine(
     }
 
     private fun scheduleReconnect() {
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.e(TAG, "已达最大重连次数 ($MAX_RECONNECT_ATTEMPTS)，放弃重连")
-            audioBuffer.clear()
-            _engineStatus.value = EngineStatus(EngineState.ERROR, "连接失败，已重试 ${reconnectAttempts} 次")
-            return
-        }
-
-        reconnectAttempts++
-        val delay = (RECONNECT_BASE_DELAY_MS * reconnectAttempts).coerceAtMost(RECONNECT_MAX_DELAY_MS)
-        Log.i(TAG, "将在 ${delay}ms 后尝试第 $reconnectAttempts 次重连...")
-        _engineStatus.value = EngineStatus(EngineState.LOADING, "正在重连 ($reconnectAttempts/$MAX_RECONNECT_ATTEMPTS)...")
-
         val url = reconnectUrl ?: return
         val config = reconnectConfig ?: return
 
-        reconnectScope?.launch {
-            delay(delay)
+        if (reconnectHandler.isExhausted) {
+            Log.e(TAG, "已达最大重连次数，放弃重连")
+            audioBuffer.clear()
+            _engineStatus.value = EngineStatus(EngineState.ERROR, "连接失败，已重试 ${EngineConstants.MAX_RECONNECT_ATTEMPTS} 次")
+            return
+        }
+
+        reconnectHandler.start { attempt ->
+            _engineStatus.value = EngineStatus(EngineState.LOADING, "正在重连 ($attempt/${EngineConstants.MAX_RECONNECT_ATTEMPTS})...")
             doConnect(url, config)
         }
     }
@@ -343,11 +335,11 @@ class FunAsrCloudEngine(
         overflowFile?.let { file ->
             try {
                 FileInputStream(file).use { fis ->
-                    val buffer = ByteArray(AUDIO_FRAME_SIZE)
+                    val buffer = ByteArray(EngineConstants.AUDIO_FRAME_SIZE)
                     while (true) {
                         val read = fis.read(buffer)
                         if (read <= 0) break
-                        val chunk = if (read == AUDIO_FRAME_SIZE) buffer.copyOf()
+                        val chunk = if (read == EngineConstants.AUDIO_FRAME_SIZE) buffer.copyOf()
                         else buffer.copyOfRange(0, read)
                         try { webSocket?.send(ByteString.of(*chunk)); sent++ }
                         catch (e: Exception) { Log.w(TAG, "溢出帧发送失败: ${e.message}"); break }
@@ -384,13 +376,5 @@ class FunAsrCloudEngine(
 
     companion object {
         private const val TAG = "FunAsrCloudEngine"
-
-        private const val MAX_BUFFER_SIZE = 1200
-        private const val AUDIO_FRAME_SIZE = 3200
-
-        /** WebSocket 重连配置 */
-        private const val MAX_RECONNECT_ATTEMPTS = 5
-        private const val RECONNECT_BASE_DELAY_MS = 1000L
-        private const val RECONNECT_MAX_DELAY_MS = 15000L
     }
 }

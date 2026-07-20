@@ -1,6 +1,9 @@
 package com.example.meetingtranscriber.ui.export
 
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.view.View
@@ -26,6 +29,9 @@ import kotlinx.coroutines.withContext
  */
 object QrShareDialog {
 
+    /** 跟踪活跃对话框对应的服务器，dismiss 时自动 stop */
+    private val serverMap = java.util.WeakHashMap<AlertDialog, LanShareServer>()
+
     fun show(fragment: Fragment, meeting: MeetingInfo, segments: List<TranscriptSegment>) {
         val context = fragment.requireContext()
         if (LanShareServer.getLocalIpAddress() == null) {
@@ -34,18 +40,39 @@ object QrShareDialog {
         }
 
         val binding = DialogQrShareBinding.inflate(fragment.layoutInflater)
-        var server: LanShareServer? = null
+
         val dialog = AlertDialog.Builder(context)
             .setTitle("扫码下载「${meeting.title}」")
             .setView(binding.root)
             .setNegativeButton("关闭", null)
             .create()
-        dialog.setOnDismissListener { server?.stop() }
+
+        // 重试按钮
+        binding.btnRetry.setOnClickListener {
+            binding.layoutError.visibility = View.GONE
+            binding.progressPrepare.visibility = View.VISIBLE
+            prepareAndStart(fragment, context, meeting, segments, binding, dialog)
+        }
+
+        dialog.setOnDismissListener {
+            serverMap.remove(dialog)?.stop()
+        }
         dialog.show()
 
+        prepareAndStart(fragment, context, meeting, segments, binding, dialog)
+    }
+
+    private fun prepareAndStart(
+        fragment: Fragment,
+        context: Context,
+        meeting: MeetingInfo,
+        segments: List<TranscriptSegment>,
+        binding: DialogQrShareBinding,
+        dialog: AlertDialog
+    ) {
         fragment.viewLifecycleOwner.lifecycleScope.launch {
             try {
-                // 准备分享文件（IO）：文档复用现有导出（已含纪要+转写），录音转标准 WAV
+                // 准备分享文件（IO）
                 val files = withContext(Dispatchers.IO) {
                     buildList {
                         ExportHelper.exportTxt(context, meeting, segments)?.let {
@@ -64,42 +91,65 @@ object QrShareDialog {
                         }
                     }
                 }
+
                 if (files.isEmpty()) {
-                    dialog.dismiss()
-                    Toast.makeText(context, "文件准备失败", Toast.LENGTH_SHORT).show()
+                    showError(binding, "文件准备失败，请检查存储空间")
                     return@launch
                 }
 
-                server = withContext(Dispatchers.IO) {
+                val server = withContext(Dispatchers.IO) {
                     LanShareServer.create(meeting.title, files)
                 }
-                val srv = server
-                if (srv == null) {
-                    dialog.dismiss()
-                    Toast.makeText(context, "分享服务启动失败，请检查网络", Toast.LENGTH_SHORT).show()
+
+                if (server == null) {
+                    showError(binding, "分享服务启动失败，请检查网络连接")
                     return@launch
                 }
+
                 if (!dialog.isShowing) {
-                    // 用户在准备期间已关闭对话框
-                    srv.stop()
+                    server.stop()
                     return@launch
                 }
 
-                val url = srv.rootUrl
-                val qrBitmap = withContext(Dispatchers.Default) { generateQrBitmap(url) }
+                // 保存 server 引用以便 dismiss 时关闭
+                serverMap[dialog] = server
 
+                val url = server.rootUrl
+                val qrBitmap = withContext(Dispatchers.Default) {
+                    generateQrBitmap(url)
+                }
+
+                // 展示成功界面
                 binding.progressPrepare.visibility = View.GONE
+                binding.layoutQr.visibility = View.VISIBLE
+                binding.layoutError.visibility = View.GONE
                 binding.ivQr.setImageBitmap(qrBitmap)
-                binding.ivQr.visibility = View.VISIBLE
                 binding.tvUrl.text = url
                 binding.tvUrl.visibility = View.VISIBLE
+                binding.btnCopyUrl.visibility = View.VISIBLE
                 binding.tvHint.visibility = View.VISIBLE
+
+                // 复制网址按钮
+                binding.btnCopyUrl.setOnClickListener {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("分享网址", url))
+                    Toast.makeText(context, "网址已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                }
+
             } catch (e: CancellationException) {
-                // 页面销毁：确保已启动的服务被关闭
-                server?.stop()
+                serverMap.remove(dialog)?.stop()
                 throw e
+            } catch (e: Exception) {
+                showError(binding, "发生错误: ${e.message ?: "未知"}")
             }
         }
+    }
+
+    private fun showError(binding: DialogQrShareBinding, message: String) {
+        binding.progressPrepare.visibility = View.GONE
+        binding.layoutQr.visibility = View.GONE
+        binding.layoutError.visibility = View.VISIBLE
+        binding.tvErrorMsg.text = message
     }
 
     private fun generateQrBitmap(content: String, size: Int = 512): Bitmap {

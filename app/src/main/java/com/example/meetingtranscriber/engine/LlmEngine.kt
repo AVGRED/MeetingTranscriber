@@ -50,7 +50,6 @@ interface LlmEngine {
 // ═══════════════════════════════════════════════════════════════
 
 enum class LlmEngineType(val displayName: String, val isCloud: Boolean) {
-    QWEN_LOCAL("Qwen-2-1.5B 本地", isCloud = false),
     DOUBAO_CLOUD("豆包 (火山方舟)", isCloud = true),
     DASHSCOPE_CLOUD("通义千问 (DashScope)", isCloud = true),
     DEEPSEEK_CLOUD("DeepSeek", isCloud = true),

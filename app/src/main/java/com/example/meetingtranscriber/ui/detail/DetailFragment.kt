@@ -15,6 +15,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.meetingtranscriber.data.model.TranscriptSegment
 import com.example.meetingtranscriber.databinding.FragmentDetailBinding
 import com.example.meetingtranscriber.ui.export.ExportHelper
+import com.example.meetingtranscriber.util.DebounceTextWatcher
 import com.example.meetingtranscriber.ui.export.QrShareDialog
 import com.example.meetingtranscriber.ui.meeting.TranscriptAdapter
 import kotlinx.coroutines.Dispatchers
@@ -40,7 +41,6 @@ class DetailFragment : Fragment() {
     private val viewModel: DetailViewModel by viewModels()
     private lateinit var adapter: TranscriptAdapter
     private var playerController: AudioPlayerController? = null
-    private var searchDebounceJob: kotlinx.coroutines.Job? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -90,16 +90,8 @@ class DetailFragment : Fragment() {
 
         // 搜索：实时过滤（每次文本变化即搜索）
         binding.etSearch.addTextChangedListener(
-            object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    searchDebounceJob?.cancel()
-                    searchDebounceJob = viewLifecycleOwner.lifecycleScope.launch {
-                        kotlinx.coroutines.delay(300)
-                        viewModel.search(s?.toString() ?: "")
-                    }
-                }
-                override fun afterTextChanged(s: android.text.Editable?) {}
+            DebounceTextWatcher(viewLifecycleOwner.lifecycleScope, 300) { query ->
+                viewModel.search(query)
             }
         )
 
@@ -249,56 +241,13 @@ class DetailFragment : Fragment() {
 
     private fun showExportDialog() {
         val meeting = viewModel.meeting.value ?: return
-        val segments = viewModel.segments.value
-        if (segments.isEmpty()) {
-            Toast.makeText(requireContext(), "暂无转写内容", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val formats = arrayOf("TXT 文本", "Word 文档", "PDF 文件", "扫码下载（文档+录音）")
-        val mimeTypes = arrayOf("text/plain", "application/msword", "application/pdf")
-
-        AlertDialog.Builder(requireContext())
-            .setTitle("导出会议记录")
-            .setItems(formats) { _, which ->
-                if (which == 3) {
-                    QrShareDialog.show(this, meeting, segments)
-                    return@setItems
-                }
-                viewLifecycleOwner.lifecycleScope.launch {
-                    // 文件生成移到 IO：长会议主线程画 PDF/拼文本会冻结数秒
-                    val file = withContext(Dispatchers.IO) {
-                        when (which) {
-                            0 -> ExportHelper.exportTxt(requireContext(), meeting, segments)
-                            1 -> ExportHelper.exportWord(requireContext(), meeting, segments)
-                            2 -> ExportHelper.exportPdf(requireContext(), meeting, segments)
-                            else -> null
-                        }
-                    }
-                    if (file != null) {
-                        AlertDialog.Builder(requireContext())
-                            .setTitle("导出成功")
-                            .setMessage("已保存到:\n${file.absolutePath}")
-                            .setPositiveButton("分享") { _, _ ->
-                                ExportHelper.shareFile(requireContext(), file, mimeTypes[which])
-                            }
-                            .setNegativeButton("关闭", null)
-                            .show()
-                    } else {
-                        Toast.makeText(requireContext(), "导出失败", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        ExportHelper.showExportDialog(this, meeting, viewModel.segments.value)
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         playerController?.release()
         playerController = null
-        searchDebounceJob?.cancel()
-        searchDebounceJob = null
         _binding = null
     }
 }

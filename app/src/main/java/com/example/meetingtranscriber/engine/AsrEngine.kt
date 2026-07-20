@@ -37,7 +37,7 @@ interface AsrEngine {
     /**
      * 通知引擎音频输入结束，冲刷缓冲区以获取最后的结果。
      */
-    fun finalize()
+    suspend fun finalize()
 
     /**
      * 释放引擎占用的所有资源（WebSocket / native 内存 / 流）。

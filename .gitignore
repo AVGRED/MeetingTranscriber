@@ -33,6 +33,12 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Kotlin daemon + dev artifacts
+.kotlin/
+screenshot*.png
+pdf_page_*.png
+meeting_check.txt
 # Large model files
 *.onnx
 *.gguf

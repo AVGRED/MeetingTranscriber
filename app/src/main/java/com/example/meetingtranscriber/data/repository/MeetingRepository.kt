@@ -28,21 +28,24 @@ class MeetingRepository(private val db: AppDatabase) {
         return meetingDao.getById(id)?.toInfo()
     }
 
-    suspend fun createMeeting(title: String, tag: String? = null): Long {
+    /** 响应式查询：音频路径/纪要等字段更新时自动推送 */
+    fun getMeetingFlow(id: Long): Flow<MeetingInfo?> {
+        return meetingDao.getByIdFlow(id).map { entity -> entity?.toInfo() }
+    }
+
+    suspend fun createMeeting(title: String): Long {
         val entity = MeetingEntity(
             title = title,
-            startTime = System.currentTimeMillis(),
-            tag = tag
+            startTime = System.currentTimeMillis()
         )
         return meetingDao.insert(entity)
     }
 
-    suspend fun createOfflineMeeting(title: String, startTime: Long, tag: String? = null): Long {
+    suspend fun createOfflineMeeting(title: String, startTime: Long): Long {
         val entity = MeetingEntity(
             title = title,
             startTime = startTime,
-            isOffline = true,
-            tag = tag
+            isOffline = true
         )
         return meetingDao.insert(entity)
     }

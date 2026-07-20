@@ -2,34 +2,28 @@ package com.example.meetingtranscriber.ui.history
 
 import android.app.AlertDialog
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
-
 import com.example.meetingtranscriber.R
 import com.example.meetingtranscriber.ui.detail.DetailFragment
 import com.example.meetingtranscriber.ui.export.ExportHelper
 import com.example.meetingtranscriber.ui.export.QrShareDialog
 import com.example.meetingtranscriber.databinding.FragmentHistoryBinding
+import com.example.meetingtranscriber.util.DebounceTextWatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class HistoryFragment : Fragment() {
-
-    companion object {
-        val PRESET_TAGS = listOf("全部", "产品", "技术", "客户", "人事", "其他")
-    }
 
     private var _binding: FragmentHistoryBinding? = null
     private val binding get() = _binding!!
@@ -79,6 +73,7 @@ class HistoryFragment : Fragment() {
 
         binding.swipeRefresh.setOnRefreshListener {
             viewModel.refresh()
+            // 给一个短暂延迟让用户感知刷新操作
             binding.swipeRefresh.postDelayed({ binding.swipeRefresh.isRefreshing = false }, 800)
         }
 
@@ -88,99 +83,64 @@ class HistoryFragment : Fragment() {
         }
 
         // 搜索栏（300ms debounce）
-        var searchJob: Job? = null
-        binding.etSearch.addTextChangedListener(object : TextWatcher {
-            override fun afterTextChanged(s: Editable?) {
-                searchJob?.cancel()
-                searchJob = viewLifecycleOwner.lifecycleScope.launch {
-                    delay(300L)
-                    viewModel.setSearchQuery(s?.toString() ?: "")
-                }
+        binding.etSearch.addTextChangedListener(
+            DebounceTextWatcher(viewLifecycleOwner.lifecycleScope, 300) { query ->
+                viewModel.setSearchQuery(query)
             }
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-        })
+        )
 
-        // 标签筛选 chips
-        setupTagChips()
-
-        // repeatOnLifecycle(RESUMED)：Tab 隐藏时停收 Room Flow，切回自动恢复
+        // ── 数据收集：使用 STARTED 确保 Tab 切换回来时立刻恢复 ──
         viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // 合并 meetings + initialized：防止初始空列表短暂显示空状态
                 launch {
-                    viewModel.meetings.collect { meetings ->
+                    combine(viewModel.meetings, viewModel.initialized) { meetings, init ->
+                        Pair(meetings, init)
+                    }.collect { (meetings, initialized) ->
                         adapter.submitList(meetings)
-                        binding.tvEmpty.visibility = if (meetings.isEmpty()) View.VISIBLE else View.GONE
+                        if (initialized) {
+                            binding.layoutEmpty.visibility =
+                                if (meetings.isEmpty()) View.VISIBLE else View.GONE
+                        }
                     }
                 }
+                // 回收站状态
                 launch {
                     viewModel.showArchived.collect { archived ->
                         binding.btnRecycleBin.text = if (archived) "返回列表" else "回收站"
-                        binding.layoutTagChips.visibility = if (archived) View.GONE else View.VISIBLE
+                    }
+                }
+                // 统计卡片
+                launch {
+                    viewModel.meetingCount.collect { count ->
+                        binding.tvMeetingCount.text = count.toString()
+                    }
+                }
+                launch {
+                    viewModel.recordingCount.collect { count ->
+                        binding.tvRecordingCount.text = count.toString()
+                    }
+                }
+                launch {
+                    viewModel.recordingLabel.collect { label ->
+                        binding.tvRecordingLabel.text = label
+                    }
+                }
+                launch {
+                    viewModel.freeStorageGB.collect { gb ->
+                        binding.tvFreeStorage.text = gb
                     }
                 }
             }
-        }
-    }
-
-    private fun setupTagChips() {
-        for (tag in PRESET_TAGS) {
-            val chip = com.google.android.material.chip.Chip(requireContext()).apply {
-                text = tag
-                isCheckable = true
-                isCheckedIconVisible = false
-                setOnClickListener {
-                    val selected = if (tag == "全部") null else tag
-                    viewModel.setTagFilter(selected)
-                }
-            }
-            binding.chipGroupTags.addView(chip)
         }
     }
 
     private fun showExportDialog(meeting: com.example.meetingtranscriber.data.model.MeetingInfo) {
-        val formats = arrayOf("TXT 文本", "Word 文档", "PDF 文件", "扫码下载（文档+录音）")
-        val mimeTypes = arrayOf("text/plain", "application/msword", "application/pdf")
-
-        AlertDialog.Builder(requireContext())
-            .setTitle("导出「${meeting.title}」")
-            .setItems(formats) { _, which ->
-                viewLifecycleOwner.lifecycleScope.launch {
-                    val (m, segments) = viewModel.loadForExport(meeting.id)
-                    val mInfo = m ?: return@launch
-                    if (segments.isEmpty()) {
-                        Toast.makeText(requireContext(), "暂无转写内容", Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-                    if (which == 3) {
-                        QrShareDialog.show(this@HistoryFragment, mInfo, segments)
-                        return@launch
-                    }
-                    // 文件生成移到 IO：长会议主线程画 PDF/拼文本会冻结数秒
-                    val file = withContext(Dispatchers.IO) {
-                        when (which) {
-                            0 -> ExportHelper.exportTxt(requireContext(), mInfo, segments)
-                            1 -> ExportHelper.exportWord(requireContext(), mInfo, segments)
-                            2 -> ExportHelper.exportPdf(requireContext(), mInfo, segments)
-                            else -> null
-                        }
-                    }
-                    if (file != null) {
-                        AlertDialog.Builder(requireContext())
-                            .setTitle("导出成功")
-                            .setMessage("已保存到:\n${file.absolutePath}")
-                            .setPositiveButton("分享") { _, _ ->
-                                ExportHelper.shareFile(requireContext(), file, mimeTypes[which])
-                            }
-                            .setNegativeButton("关闭", null)
-                            .show()
-                    } else {
-                        Toast.makeText(requireContext(), "导出失败", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val (m, segments) = viewModel.loadForExport(meeting.id)
+            val mInfo = m ?: return@launch
+            ExportHelper.showExportDialog(this@HistoryFragment, mInfo, segments)
+        }
     }
 
     override fun onDestroyView() {

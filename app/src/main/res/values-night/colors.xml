@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- M3 Primary (lighter blue for dark theme) -->
+    <color name="primary">#90CAF9</color>
+    <color name="on_primary">#003258</color>
+    <color name="primary_container">#00497D</color>
+    <color name="on_primary_container">#D1E4FF</color>
+
+    <!-- M3 Secondary -->
+    <color name="secondary">#BBC7DB</color>
+    <color name="on_secondary">#253140</color>
+    <color name="secondary_container">#3C4858</color>
+    <color name="on_secondary_container">#D7E3F7</color>
+
+    <!-- M3 Tertiary -->
+    <color name="tertiary">#D7BDE4</color>
+    <color name="on_tertiary">#3B2948</color>
+    <color name="tertiary_container">#523F5F</color>
+    <color name="on_tertiary_container">#F2DAFF</color>
+
+    <!-- M3 Error -->
+    <color name="error_red">#FFB4AB</color>
+    <color name="on_error">#690005</color>
+    <color name="error_container">#93000A</color>
+
+    <!-- M3 Surface / Background -->
+    <color name="background">#1A1C1E</color>
+    <color name="on_background">#E2E2E6</color>
+    <color name="surface">#1A1C1E</color>
+    <color name="on_surface">#E2E2E6</color>
+    <color name="surface_variant">#43474E</color>
+    <color name="on_surface_variant">#C3C7CF</color>
+    <color name="outline">#8D9199</color>
+    <color name="outline_variant">#43474E</color>
+
+    <!-- Legacy aliases -->
+    <color name="primary_dark">#90CAF9</color>
+    <color name="accent">#90CAF9</color>
+
+    <!-- 说话人颜色（暗色模式：饱和度降低以护眼） -->
+    <color name="speaker_1">#90CAF9</color>
+    <color name="speaker_2">#FFB74D</color>
+    <color name="speaker_3">#81C784</color>
+    <color name="speaker_4">#CE93D8</color>
+    <color name="speaker_5">#EF9A9A</color>
+    <color name="speaker_6">#80CBC4</color>
+    <color name="speaker_7">#FFF176</color>
+    <color name="speaker_8">#BCAAA4</color>
+
+    <!-- 功能色 -->
+    <color name="warning_orange">#FFB74D</color>
+    <color name="on_warning">#3E2723</color>
+    <color name="interim_text">#9E9E9E</color>
+    <color name="status_recording">#66BB6A</color>
+    <color name="status_connected_silent">#64B5F6</color>
+    <color name="status_paused">#FFD54F</color>
+    <color name="divider">#2E2E2E</color>
+
+    <!-- 内容状态指示器（暗色模式：亮度提高以保证对比度） -->
+    <color name="indicator_recording">#FFB74D</color>
+    <color name="indicator_summary">#81C784</color>
+</resources>

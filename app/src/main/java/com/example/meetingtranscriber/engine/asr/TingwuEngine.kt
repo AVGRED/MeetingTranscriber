@@ -142,7 +142,7 @@ class TingwuEngine(
         wsClient.sendAudio(pcmData)
     }
 
-    override fun finalize() {
+    override suspend fun finalize() {
         try {
             wsClient.disconnect()
             Log.i(TAG, "通义听悟 WebSocket 已断开")

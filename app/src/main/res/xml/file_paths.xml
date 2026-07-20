@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- 导出文件共享 -->
     <external-files-path
         name="exports"
         path="exports/" />
+    <!-- 相机拍照 FileProvider 兜底（部分 OEM 只接受 content URI 但需缓存中转） -->
+    <cache-path
+        name="camera_fallback"
+        path="camera/" />
 </paths>

@@ -51,7 +51,7 @@ class DoubaoEngine(
 
         _engineStatus.value = EngineStatus(EngineState.LOADING, "正在验证豆包 API Key...")
 
-        if (!prefs.hasArkKey()) {
+        if (prefs.resolveArkApiKey().isBlank()) {
             val msg = "火山方舟 API Key 未配置"
             Log.w(TAG, msg)
             _engineStatus.value = EngineStatus(EngineState.ERROR, msg)
@@ -76,8 +76,8 @@ class DoubaoEngine(
             _generationProgress.value = 0f
 
             try {
-                val apiKey = prefs.arkApiKey
-                val endpointId = prefs.arkEndpointId.ifBlank { DEFAULT_MODEL }
+                val apiKey = prefs.resolveArkApiKey()
+                val endpointId = prefs.resolveArkEndpointId().ifBlank { DEFAULT_MODEL }
                 val prompt = buildPrompt(transcript, style)
 
                 _generationProgress.value = 0.3f
@@ -87,7 +87,7 @@ class DoubaoEngine(
                     put("messages", JSONArray().apply {
                         put(JSONObject().apply {
                             put("role", "system")
-                            put("content", SYSTEM_PROMPT)
+                            put("content", PromptBuilder.SYSTEM_PROMPT)
                         })
                         put(JSONObject().apply {
                             put("role", "user")
@@ -107,8 +107,9 @@ class DoubaoEngine(
 
                 _generationProgress.value = 0.5f
 
-                activeCall = client.newCall(request)
-                val response = activeCall!!.execute()
+                val call = client.newCall(request)
+                activeCall = call
+                val response = call.execute()
                 val responseBody = response.body?.string()
 
                 _generationProgress.value = 0.8f
@@ -188,6 +189,6 @@ class DoubaoEngine(
 
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
-        private const val SYSTEM_PROMPT = "你是一位专业的会议纪要助手，输出清晰、结构化、可执行。"
+        // SYSTEM_PROMPT 已迁移至 PromptBuilder.SYSTEM_PROMPT
     }
 }

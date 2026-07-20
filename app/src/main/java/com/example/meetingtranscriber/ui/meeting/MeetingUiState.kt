@@ -29,5 +29,12 @@ data class MeetingUiState(
     /** 是否正在生成摘要 */
     val isGeneratingSummary: Boolean = false,
     /** 摘要生成进度 0f..1f */
-    val summaryProgress: Float = 0f
+    val summaryProgress: Float = 0f,
+    // ── 纪要审核弹窗 ──
+    /** 纪要生成完成后弹出审核弹窗 */
+    val showSummaryReviewDialog: Boolean = false,
+    /** 弹窗中展示的纪要文本 */
+    val latestSummary: String = "",
+    /** 纪要对应的会议 ID（供弹窗操作复用） */
+    val summaryMeetingId: Long = 0L
 )

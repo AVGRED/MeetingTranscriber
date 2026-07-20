@@ -56,7 +56,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="离线"
-            android:textColor="#FF9800"
+            android:textColor="@color/warning_orange"
             android:visibility="visible" />
 
         <!-- 暂停按钮（会议中显示） -->
@@ -122,14 +122,6 @@
             android:layout_marginStart="8dp"
             android:spinnerMode="dropdown"
             android:dropDownVerticalOffset="48dp" />
-
-        <Spinner
-            android:id="@+id/spinner_tag"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginStart="8dp"
-            android:spinnerMode="dropdown"
-            android:dropDownVerticalOffset="48dp" />
     </LinearLayout>
 
     <!-- 当前引擎标签 -->
@@ -151,7 +143,7 @@
         android:layout_height="28dp"
         android:gravity="center"
         android:orientation="horizontal"
-        android:background="#FF9800"
+        android:background="@color/warning_orange"
         android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/tv_engine_label"
         tools:visibility="visible">
@@ -163,7 +155,7 @@
             android:layout_weight="1"
             android:text="重新连接中..."
             android:textSize="11sp"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/on_warning"
             android:gravity="center" />
 
         <Button
@@ -173,7 +165,7 @@
             android:layout_height="match_parent"
             android:text="重试"
             android:textSize="11sp"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/on_warning"
             android:visibility="gone"
             tools:visibility="visible" />
     </LinearLayout>
@@ -185,8 +177,8 @@
         android:layout_height="wrap_content"
         android:padding="10dp"
         android:textSize="13sp"
-        android:textColor="#FFFFFF"
-        android:background="#D32F2F"
+        android:background="@color/error_red"
+        android:textColor="@color/on_error"
         android:visibility="gone"
         android:gravity="center_vertical"
         android:paddingHorizontal="14dp"

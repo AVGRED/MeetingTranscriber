@@ -25,6 +25,9 @@ class TranscriptAdapter(
 ) : ListAdapter<AdapterItem, RecyclerView.ViewHolder>(DiffCallback) {
 
     companion object {
+        /** 说话人 → 颜色索引缓存：避免每帧 bind 都重新计算 hashCode */
+        private val speakerColorCache = mutableMapOf<String, Int>()
+
         private const val VIEW_TYPE_SEGMENT = 0
         private const val VIEW_TYPE_INTERIM = 1
         private const val VIEW_TYPE_TOPIC_HEADER = 2
@@ -43,7 +46,6 @@ class TranscriptAdapter(
 
     private var interimText: String? = null
     private var searchQuery: String? = null
-
     fun setSearchQuery(query: String?) {
         searchQuery = if (query.isNullOrBlank()) null else query.lowercase()
     }
@@ -63,13 +65,41 @@ class TranscriptAdapter(
         }
     }
 
-    fun submitSegments(segments: List<TranscriptSegment>, commitCallback: Runnable? = null) {
-        val items = buildAdapterItems(segments)
+    /** 上次 submit 时的 segment 数量（用于直播模式检测新增增量） */
+    private var lastSubmittedSize = 0
+    /** 上次直播中看到的最后一个 topicId（避免每帧重算 topic 头） */
+    private var lastTopicId = -1
+
+    fun submitSegments(segments: List<TranscriptSegment>, isLive: Boolean = false, commitCallback: Runnable? = null) {
+        val items = if (isLive && segments.size > lastSubmittedSize) {
+            buildAdapterItemsIncremental(segments)
+        } else {
+            buildAdapterItems(segments)
+        }
+        lastSubmittedSize = segments.size
         submitList(items, commitCallback)
     }
 
+    /** 直播模式渐进构建：只处理新增片段，避免每帧 O(n) 重扫描全列表 */
+    private fun buildAdapterItemsIncremental(segments: List<TranscriptSegment>): List<AdapterItem> {
+        val currentItems = currentList.toMutableList()
+        val newStart = lastSubmittedSize.coerceAtMost(segments.size)
+        for (i in newStart until segments.size) {
+            val seg = segments[i]
+            if (seg.topicId != 0 && seg.topicId != lastTopicId) {
+                lastTopicId = seg.topicId
+                currentItems.add(AdapterItem.TopicHeader(seg.topicId, 0))
+            }
+            currentItems.add(AdapterItem.SegmentItem(seg))
+        }
+        return currentItems
+    }
+
     private fun buildAdapterItems(segments: List<TranscriptSegment>): List<AdapterItem> {
-        if (segments.isEmpty()) return emptyList()
+        if (segments.isEmpty()) {
+            lastTopicId = -1
+            return emptyList()
+        }
         // 实时 append 与 DB ORDER BY 两个来源本就有序：先 O(n) 检查，避免每句全量排序
         var isSorted = true
         for (i in 1 until segments.size) {
@@ -87,6 +117,7 @@ class TranscriptAdapter(
             }
             result.add(AdapterItem.SegmentItem(seg))
         }
+        lastTopicId = currentTopic
         return result
     }
 
@@ -158,7 +189,9 @@ class TranscriptAdapter(
 
             speakerText.text = segment.displaySpeaker
 
-            val colorIndex = (segment.displaySpeaker.hashCode() and Integer.MAX_VALUE) % SPEAKER_COLORS.size
+            val colorIndex = TranscriptAdapter.speakerColorCache.getOrPut(segment.displaySpeaker) {
+                (segment.displaySpeaker.hashCode() and Integer.MAX_VALUE) % SPEAKER_COLORS.size
+            }
             val color = ContextCompat.getColor(context, SPEAKER_COLORS[colorIndex])
             speakerText.setTextColor(color)
 

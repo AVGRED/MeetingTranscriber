@@ -321,7 +321,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
     /** 当前轮次的 speakerId（会议结束时声纹 flush 最后一轮用，不切轮） */
     fun currentSpeakerId(): String = "speaker_$currentSpeakerIndex"
 
-    override fun finalize() {
+    override suspend fun finalize() {
         // 先停 interim 协程，避免与最后的 final decode 竞争
         interimJob?.cancel()
         interimJob = null
@@ -342,7 +342,7 @@ class FunAsrEngine(private val context: Context) : AsrEngine {
         // 关闭队列并等消费完：保证最后一句发出后才返回（stop() 依赖此时序）
         decodeChannel?.close()
         try {
-            runBlocking { withTimeoutOrNull(30_000) { decodeConsumerJob?.join() } }
+            withTimeoutOrNull(30_000) { decodeConsumerJob?.join() }
         } catch (e: Exception) {
             Log.e(TAG, "finalize 等待 decode 异常: ${e.message}")
         }

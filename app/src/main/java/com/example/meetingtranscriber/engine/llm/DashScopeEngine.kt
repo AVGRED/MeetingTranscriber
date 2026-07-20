@@ -109,8 +109,9 @@ class DashScopeEngine(
 
                 _generationProgress.value = 0.5f
 
-                activeCall = client.newCall(request)
-                val response = activeCall!!.execute()
+                val call = client.newCall(request)
+                activeCall = call
+                val response = call.execute()
                 val responseBody = response.body?.string()
 
                 _generationProgress.value = 0.8f

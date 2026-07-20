@@ -17,8 +17,9 @@ import java.util.Locale
 /**
  * 详情页录音播放器（MediaPlayer + SeekBar 封装）
  *
- * 加密 MTEW 录音经 AudioCacheManager 转标准 WAV 后播放；
- * 录音缺失时显示提示文案，无录音的老会议整体隐藏。
+ * 加密 MTEW 录音经 AudioCacheManager 转标准 WAV 后播放。
+ * 现在用 [AudioPlayerController] 控制 [FragmentDetailBinding.layoutAudioSection] 的可见性，
+ * 录音存在/缺失/无录音三种状态有明确的视觉反馈。
  */
 class AudioPlayerController(
     private val binding: FragmentDetailBinding,
@@ -47,30 +48,37 @@ class AudioPlayerController(
         })
     }
 
-    /** meeting flow 会多次 emit，path 未变则跳过 */
+    /** meeting 响应式 Flow 每次 emit 都会调用；path 未变则跳过，避免重置播放进度 */
     fun bind(audioFilePath: String?) {
-        Log.d(TAG, "bind: path=$audioFilePath exists=${audioFilePath?.let { File(it).exists() }}")
         if (audioFilePath == boundPath) return
         boundPath = audioFilePath
         resetPlayer()
 
         when {
             audioFilePath == null -> {
-                // 老会议本无录音，不打扰
+                // 老会议本无录音 → 显示无录音提示
+                binding.layoutAudioSection.visibility = View.GONE
                 binding.layoutPlayer.visibility = View.GONE
-                binding.tvAudioMissing.visibility = View.GONE
+                binding.tvAudioMissing.visibility = View.VISIBLE
             }
             !File(audioFilePath).exists() -> {
+                // 文件被清理 → 显示缺失提示
+                binding.layoutAudioSection.visibility = View.GONE
                 binding.layoutPlayer.visibility = View.GONE
                 binding.tvAudioMissing.visibility = View.VISIBLE
             }
             else -> {
+                // 有录音 → 显示播放器区域
+                binding.layoutAudioSection.visibility = View.VISIBLE
                 binding.layoutPlayer.visibility = View.VISIBLE
                 binding.tvAudioMissing.visibility = View.GONE
                 binding.tvAudioTime.text = "准备中…"
+
                 prepareJob = scope.launch {
                     val wav = AudioCacheManager.getPlayableWav(binding.root.context, audioFilePath)
                     if (wav == null) {
+                        // 解密/转换失败 → 降级显示缺失
+                        binding.layoutAudioSection.visibility = View.GONE
                         binding.layoutPlayer.visibility = View.GONE
                         binding.tvAudioMissing.visibility = View.VISIBLE
                         return@launch
@@ -115,6 +123,7 @@ class AudioPlayerController(
             }
         } catch (e: Exception) {
             Log.e(TAG, "初始化播放器失败: ${e.message}", e)
+            binding.layoutAudioSection.visibility = View.GONE
             binding.layoutPlayer.visibility = View.GONE
             binding.tvAudioMissing.visibility = View.VISIBLE
         }

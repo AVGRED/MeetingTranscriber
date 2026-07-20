@@ -6,9 +6,16 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import com.example.meetingtranscriber.data.model.MeetingInfo
 import com.example.meetingtranscriber.data.model.TranscriptSegment
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -160,6 +167,61 @@ object ExportHelper {
         }
 
         return file
+    }
+
+    /**
+     * 显示导出弹窗（统一的导出入口，供 DetailFragment & HistoryFragment 共用）。
+     *
+     * @param fragment 宿主 Fragment（需要 lifecycleScope）
+     * @param meeting  会议信息
+     * @param segments 转写片段列表
+     */
+    fun showExportDialog(
+        fragment: Fragment,
+        meeting: MeetingInfo,
+        segments: List<TranscriptSegment>
+    ) {
+        val ctx = fragment.requireContext()
+        if (segments.isEmpty()) {
+            Toast.makeText(ctx, "暂无转写内容", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val formats = arrayOf("TXT 文本", "Word 文档", "PDF 文件", "扫码下载（文档+录音）")
+        val mimeTypes = arrayOf("text/plain", "application/msword", "application/pdf")
+
+        AlertDialog.Builder(ctx)
+            .setTitle("导出「${meeting.title}」")
+            .setItems(formats) { _, which ->
+                if (which == 3) {
+                    QrShareDialog.show(fragment, meeting, segments)
+                    return@setItems
+                }
+                fragment.lifecycleScope.launch {
+                    val file = withContext(Dispatchers.IO) {
+                        when (which) {
+                            0 -> exportTxt(ctx, meeting, segments)
+                            1 -> exportWord(ctx, meeting, segments)
+                            2 -> exportPdf(ctx, meeting, segments)
+                            else -> null
+                        }
+                    }
+                    if (file != null) {
+                        AlertDialog.Builder(ctx)
+                            .setTitle("导出成功")
+                            .setMessage("已保存到:\n${file.absolutePath}")
+                            .setPositiveButton("分享") { _, _ ->
+                                shareFile(ctx, file, mimeTypes[which])
+                            }
+                            .setNegativeButton("关闭", null)
+                            .show()
+                    } else {
+                        Toast.makeText(ctx, "导出失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     fun shareFile(context: Context, file: File, mimeType: String = "text/plain") {

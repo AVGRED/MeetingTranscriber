@@ -1,8 +1,8 @@
-# MeetingTranscriber v2.0 技术文档
+# MeetingTranscriber v3.0 技术文档
 
 ## 概述
 
-Android 离线会议录音转写与 AI 纪要生成应用。全程离线、无需联网、无需 Key。
+Android 会议录音转写与 AI 纪要生成应用。ASR 纯本地（无需联网），LLM 纪要走云端。
 
 ## 架构
 
@@ -11,28 +11,27 @@ UI (5 Tab: 首页/API配置/会议/历史/设置)
     ↑ ViewModel + StateFlow
 UseCase (TranscriptionUseCase / SummaryUseCase)
     ↑
-EngineRouter (引擎路由 + 自动降级)
+EngineRouter (引擎路由 + Key检查)
     ↑
 AsrEngine 接口              LlmEngine 接口
-├─ FunAsrEngine (离线)      ├─ QwenEngine (本地 llama.cpp)
-├─ FunAsrCloudEngine (ws)   ├─ DoubaoEngine (火山方舟)
-├─ TingwuEngine (阿里云)    └─ DashScopeEngine (通义千问)
-└─ VolcengineEngine (火山)
+├─ FunAsrEngine (离线)      ├─ DoubaoEngine (火山方舟)
+├─ FunAsrCloudEngine (ws)   ├─ DashScopeEngine (通义千问)
+├─ TingwuEngine (阿里云)    └─ 通用 OpenAI 兼容引擎
+└─ VolcengineEngine (火山)     (DeepSeek/Kimi/智谱/硅基流动)
 ```
 
 ## 引擎路由
 
 ```
-默认 FunASR 本地 → 无需任何配置
-云端 Key 已配 + 有网 → 自动走云端
-云端异常 + 自动降级开 → 本地兜底（不会报错）
+ASR: 默认 FunASR 本地 → Key 已配+有网 → 自动走云端 → 异常降级本地
+LLM: 默认豆包云端 → Key 未配/无网 → 报错 → MeetingSummaryGenerator 规则兜底
 ```
 
 ## 实时转写
 
 - **离线引擎**: sherpa-onnx SenseVoiceSmall, 16kHz/16bit/mono
 - **双轨解码**: 主 stream 累积 → VAD 停顿 0.8s 出最终句；滑动窗口 250ms interim decode 出实时文本
-- **锁策略**: engineLock → decodeLock 顺序一致，dispose 持 decodeLock 防竞态
+- **说话人分离**: SileroVAD + VoiceprintIdentifier 声纹识别
 
 ## 模型文件
 
@@ -40,18 +39,15 @@ AsrEngine 接口              LlmEngine 接口
 |---|---|---|
 | `sense-voice-small-cn.onnx` | ~43MB | ASR 离线语音识别 |
 | `tokens.txt` | ~KB | 模型词表 |
-| `qwen2.5-xxx.gguf` | ~1.1GB | 本地 LLM 摘要（可选下载） |
+| `silero_vad.onnx` | ~1.5MB | 神经网络 VAD |
 
 ## 构建
 
 ```bash
-# 1. 准备 llama.cpp（如需本地 LLM）
-cd app/src/main/cpp
-git clone https://github.com/ggerganov/llama.cpp.git
-
-# 2. 构建
 ./gradlew assembleDebug
 ```
+
+不再需要 NDK / CMake / llama.cpp。
 
 ## 导出
 
@@ -70,12 +66,14 @@ git clone https://github.com/ggerganov/llama.cpp.git
 | 火山方舟 LLM | https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey |
 | DashScope | https://dashscope.console.aliyun.com/apiKey |
 
+预置 Key 方式：在 `gradle-local.properties` 中填入 `ARK_API_KEY` 和 `ARK_ENDPOINT_ID`，构建时注入 BuildConfig，运行时自动 fallback。
+
 ## 关键文件
 
 | 层 | 文件 |
 |---|---|
 | ASR 引擎 | `engine/asr/FunAsrEngine.kt` |
-| LLM 引擎 | `engine/llm/QwenEngine.kt` |
+| LLM 引擎 | `engine/llm/DoubaoEngine.kt` |
 | 引擎路由 | `engine/EngineRouter.kt` |
 | 转写用例 | `domain/TranscriptionUseCase.kt` |
 | 摘要用例 | `domain/SummaryUseCase.kt` |
