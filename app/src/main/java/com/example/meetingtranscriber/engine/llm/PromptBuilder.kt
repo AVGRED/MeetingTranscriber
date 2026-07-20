@@ -8,7 +8,17 @@ import com.example.meetingtranscriber.engine.SummaryStyle
 object PromptBuilder {
 
     /** 共享的系统提示词，供所有 LLM 引擎统一引用 */
-    const val SYSTEM_PROMPT = "你是一位专业的会议纪要助手，输出清晰、结构化、可执行。"
+    const val SYSTEM_PROMPT =
+        "你是一位专业的会议纪要助手。直接输出纪要正文，禁止输出任何开场白、客套话、结尾语、署名、免责声明。"
+
+    /** 所有 prompt 尾部追加的格式约束 */
+    private val OUTPUT_RULES = """
+格式要求：
+- 直接输出纪要内容，不要写"以下是会议纪要""根据转写内容"等开场白
+- 不要写"以上就是本次会议""纪要完毕""如有遗漏请指正"等结尾语
+- 不要署名或添加免责声明
+- 用中文输出
+    """.trimIndent()
 
     /**
      * 构建云端 LLM 的通用 prompt。
@@ -51,6 +61,8 @@ object PromptBuilder {
 $roleDescription
 
 $styleInstruction
+
+$OUTPUT_RULES
 
 会议转写内容：
 $transcript

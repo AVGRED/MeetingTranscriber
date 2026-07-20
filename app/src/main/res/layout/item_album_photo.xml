@@ -1,10 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ImageView
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/iv_photo"
     android:layout_width="match_parent"
     android:layout_height="120dp"
-    android:layout_margin="2dp"
-    android:scaleType="centerCrop"
-    android:background="@color/surface"
-    android:contentDescription="照片" />
+    android:layout_margin="2dp">
+
+    <!-- 照片 -->
+    <ImageView
+        android:id="@+id/iv_photo"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:background="@color/surface"
+        android:contentDescription="照片" />
+
+    <!-- 选中遮罩（半透明白底） -->
+    <View
+        android:id="@+id/v_select_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#80FFFFFF"
+        android:visibility="gone" />
+
+    <!-- 选中勾选图标（右上角） -->
+    <ImageView
+        android:id="@+id/iv_check"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="4dp"
+        android:src="@drawable/ic_check_circle"
+        android:visibility="gone"
+        android:contentDescription="已选中" />
+
+</FrameLayout>

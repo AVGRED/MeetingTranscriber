@@ -58,19 +58,16 @@ class AudioPlayerController(
             audioFilePath == null -> {
                 // 老会议本无录音 → 显示无录音提示
                 binding.layoutAudioSection.visibility = View.GONE
-                binding.layoutPlayer.visibility = View.GONE
                 binding.tvAudioMissing.visibility = View.VISIBLE
             }
             !File(audioFilePath).exists() -> {
                 // 文件被清理 → 显示缺失提示
                 binding.layoutAudioSection.visibility = View.GONE
-                binding.layoutPlayer.visibility = View.GONE
                 binding.tvAudioMissing.visibility = View.VISIBLE
             }
             else -> {
                 // 有录音 → 显示播放器区域
                 binding.layoutAudioSection.visibility = View.VISIBLE
-                binding.layoutPlayer.visibility = View.VISIBLE
                 binding.tvAudioMissing.visibility = View.GONE
                 binding.tvAudioTime.text = "准备中…"
 
@@ -79,7 +76,6 @@ class AudioPlayerController(
                     if (wav == null) {
                         // 解密/转换失败 → 降级显示缺失
                         binding.layoutAudioSection.visibility = View.GONE
-                        binding.layoutPlayer.visibility = View.GONE
                         binding.tvAudioMissing.visibility = View.VISIBLE
                         return@launch
                     }
@@ -124,7 +120,6 @@ class AudioPlayerController(
         } catch (e: Exception) {
             Log.e(TAG, "初始化播放器失败: ${e.message}", e)
             binding.layoutAudioSection.visibility = View.GONE
-            binding.layoutPlayer.visibility = View.GONE
             binding.tvAudioMissing.visibility = View.VISIBLE
         }
     }

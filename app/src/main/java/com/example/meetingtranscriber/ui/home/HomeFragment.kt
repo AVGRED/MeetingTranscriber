@@ -1,8 +1,11 @@
 package com.example.meetingtranscriber.ui.home
 
+import android.Manifest
+import android.app.Activity
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
@@ -44,6 +47,18 @@ class HomeFragment : Fragment() {
             "xiaomi", "redmi", "huawei", "honor",
             "oppo", "oneplus", "realme", "vivo", "iqoo"
         )
+
+        /** 生成拍照文件名 */
+        private fun generatePhotoFilename(): String =
+            "MT_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
+
+        /** 构建 MediaStore 照片的 ContentValues（含 DISPLAY_NAME / MIME_TYPE / RELATIVE_PATH） */
+        private fun buildPhotoValues(name: String): ContentValues =
+            ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Camera2CaptureHelper.ALBUM_PATH)
+            }
     }
 
     private var _binding: FragmentHomeBinding? = null
@@ -56,8 +71,8 @@ class HomeFragment : Fragment() {
     /** FileProvider 兜底 URI（部分 OEM 需要） */
     private var pendingFileProviderUri: Uri? = null
 
-    /** 拍照开始时间戳，用于恢复窗口 */
-    private var photoTimestamp: Long = 0L
+    /** 拍照开始时间戳，用于恢复窗口（Camera2 onSuccess 在后台线程写入，加 @Volatile） */
+    @Volatile private var photoTimestamp: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,6 +100,13 @@ class HomeFragment : Fragment() {
             when {
                 size > 0 -> {
                     // 照片成功写入我们的 URI
+                    // 立即清除 IS_PENDING（系统相机 App 可能忽略 Pending API 协议）
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val cv = ContentValues().apply {
+                            put(MediaStore.Images.Media.IS_PENDING, 0)
+                        }
+                        resolver.update(uri, cv, null, null)
+                    }
                     Toast.makeText(requireContext(), "已保存到相册", Toast.LENGTH_SHORT).show()
                     scheduleLateRecoveryCheck(resolver)  // 部分 OEM 延迟写入缩略图
                 }
@@ -97,6 +119,7 @@ class HomeFragment : Fragment() {
                     if (!found) {
                         // 延迟再次扫描（部分相机处理需要更长时间）
                         Handler(Looper.getMainLooper()).postDelayed({
+                            if (!isAdded) return@postDelayed
                             val foundDelayed = recoverPhotoFromDefaultLocation(resolver)
                             if (!foundDelayed && success) {
                                 Toast.makeText(requireContext(), "拍照保存失败，请检查相册", Toast.LENGTH_LONG).show()
@@ -105,7 +128,20 @@ class HomeFragment : Fragment() {
                     }
                 }
             }
+            isTakingPhoto = false
         }
+
+    // ── CAMERA 权限请求 ──
+    private val cameraPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) startCamera2Capture()
+            else {
+                isTakingPhoto = false
+                takePhotoWithPendingFlag()
+            }
+        }
+    /** Camera2 拍照辅助（后台线程回调读写，加 @Volatile） */
+    @Volatile private var camera2Helper: Camera2CaptureHelper? = null
 
     // ── 拍照 launcher（兜底通道：FileProvider URI） ──
     private val takePictureFileProviderLauncher =
@@ -128,6 +164,7 @@ class HomeFragment : Fragment() {
                     Toast.makeText(requireContext(), "拍照保存失败", Toast.LENGTH_SHORT).show()
                 }
             }
+            isTakingPhoto = false
         }
 
     override fun onCreateView(
@@ -161,51 +198,83 @@ class HomeFragment : Fragment() {
         binding.btnGallery.setOnClickListener { openGallery() }
     }
 
+    /** 拍照进行中标志（防止双击创建多个并发拍照） */
+    @Volatile private var isTakingPhoto = false
+
     /**
      * 拍照主入口：自适应选择最佳策略
      *
      * 策略优先级：
-     * 1. Pixel/原生 Android → MediaStore URI (IS_PENDING)，兼容性最好
+     * 1. 标准设备 → Camera2 直拍（绕过系统相机 EXIF bug）
      * 2. 三星 → MediaStore URI (IS_PENDING)，三星相机通常尊重
      * 3. 小米/华为/OPPO/vivo → MediaStore URI (NO IS_PENDING) + FileProvider 兜底
      */
     private fun takePhoto() {
-        // 检查相机可用性
+        if (isTakingPhoto) {
+            android.util.Log.w(TAG, "拍照进行中，忽略重复点击")
+            return
+        }
+        isTakingPhoto = true
+
         val pm = requireContext().packageManager
         if (!pm.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY)) {
             Toast.makeText(requireContext(), "此设备没有相机", Toast.LENGTH_SHORT).show()
+            isTakingPhoto = false
             return
         }
 
-        val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-        if (intent.resolveActivity(pm) == null) {
-            Toast.makeText(requireContext(), "未找到相机应用", Toast.LENGTH_SHORT).show()
-            return
+        // 系统相机可用性检查（三星/OEM 路径依赖系统相机 App）
+        val manufacturer = getManufacturer()
+        val isSamsungOrOem = URI_IGNORING_OEMS.any { manufacturer.contains(it) } ||
+                manufacturer.contains("samsung")
+        if (isSamsungOrOem) {
+            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+            if (intent.resolveActivity(pm) == null) {
+                Toast.makeText(requireContext(), "未找到相机应用", Toast.LENGTH_SHORT).show()
+                isTakingPhoto = false
+                return
+            }
         }
 
         photoTimestamp = System.currentTimeMillis()
-        val manufacturer = getManufacturer()
-
-        // 清理之前的相机缓存
         cleanCameraCache()
 
         when {
-            // 策略 A：已知忽略 URI 的 OEM → 同时准备 FileProvider 兜底
             URI_IGNORING_OEMS.any { manufacturer.contains(it) } -> {
-                android.util.Log.i(TAG, "检测到 ${manufacturer}，使用双通道策略")
                 takePhotoWithFallback()
             }
-            // 策略 B：三星 → IS_PENDING 模式
             manufacturer.contains("samsung") -> {
-                android.util.Log.i(TAG, "三星设备，使用 IS_PENDING 策略")
                 takePhotoWithPendingFlag()
             }
-            // 策略 C：原生/Pixel → IS_PENDING 模式
             else -> {
-                android.util.Log.i(TAG, "标准设备 ($manufacturer)，使用 IS_PENDING 策略")
-                takePhotoWithPendingFlag()
+                if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA)
+                    == PackageManager.PERMISSION_GRANTED
+                ) startCamera2Capture()
+                else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
             }
         }
+    }
+
+    private fun startCamera2Capture() {
+        val helper = Camera2CaptureHelper(requireContext())
+        camera2Helper = helper
+        helper.capture(
+            onSuccess = { uri ->
+                android.util.Log.i(TAG, "Camera2 拍照成功: $uri")
+                photoTimestamp = null
+                camera2Helper = null
+                isTakingPhoto = false
+            },
+            onError = { error ->
+                android.util.Log.w(TAG, "Camera2 拍照失败: $error")
+                camera2Helper = null
+                // Camera2 回调在后台 HandlerThread；takePictureLauncher.launch() 必须在主线程
+                Handler(Looper.getMainLooper()).post {
+                    isTakingPhoto = false
+                    takePhotoWithPendingFlag()
+                }
+            }
+        )
     }
 
     /** 策略：IS_PENDING 模式（三星/Pixel/原生） */
@@ -213,11 +282,8 @@ class HomeFragment : Fragment() {
         val resolver = requireContext().contentResolver
         var uri: Uri? = null
         try {
-            val name = "MT_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MeetingTranscriber")
+            val name = generatePhotoFilename()
+            val values = buildPhotoValues(name).apply {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(MediaStore.Images.Media.IS_PENDING, 1)
                 }
@@ -244,6 +310,7 @@ class HomeFragment : Fragment() {
             android.util.Log.w(TAG, "IS_PENDING 策略失败: ${e.message}，降级到兜底策略")
             pendingPhotoUri = null
             uri?.let { resolver.delete(it, null, null) }
+            isTakingPhoto = false
             takePhotoWithFallback()
         }
     }
@@ -253,15 +320,11 @@ class HomeFragment : Fragment() {
         val resolver = requireContext().contentResolver
         var uri: Uri? = null
         try {
-            val name = "MT_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
+            val name = generatePhotoFilename()
             // 通道 1：MediaStore URI（不带 IS_PENDING）
             uri = resolver.insert(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MeetingTranscriber")
-                }
+                buildPhotoValues(name)
             ) ?: throw IllegalStateException("MediaStore insert 返回 null")
 
             pendingPhotoUri = uri
@@ -286,6 +349,7 @@ class HomeFragment : Fragment() {
             pendingPhotoUri = null
             pendingFileProviderUri = null
             uri?.let { resolver.delete(it, null, null) }
+            isTakingPhoto = false
             Toast.makeText(requireContext(), "无法打开相机", Toast.LENGTH_SHORT).show()
         }
     }
@@ -294,9 +358,13 @@ class HomeFragment : Fragment() {
      * 从默认相机位置恢复照片。
      * 增强版：30 秒窗口 + 去重 + 多时间字段检查。
      */
-    private fun recoverPhotoFromDefaultLocation(resolver: android.content.ContentResolver): Boolean {
+    private fun recoverPhotoFromDefaultLocation(
+        resolver: android.content.ContentResolver,
+        captureTs: Long? = null
+    ): Boolean {
+        val ts = captureTs ?: (photoTimestamp ?: 0L)
         try {
-            val thirtySecondsAgo = (photoTimestamp / 1000) - 30
+            val thirtySecondsAgo = (ts / 1000) - 30
             val candidates = mutableListOf<MediaStorePhoto>()
 
             // 扫描最近 30 秒新增/修改的照片
@@ -324,7 +392,7 @@ class HomeFragment : Fragment() {
                 while (cursor.moveToNext()) {
                     val path = cursor.getString(pathCol) ?: ""
                     // 跳过已在我们相册目录的照片（MediaStore URI 被接受的情况）
-                    if (path.startsWith("Pictures/MeetingTranscriber")) continue
+                    if (path.startsWith(Camera2CaptureHelper.ALBUM_PATH)) continue
 
                     candidates.add(
                         MediaStorePhoto(
@@ -346,7 +414,7 @@ class HomeFragment : Fragment() {
 
             // 按拍摄时间排序（DATE_TAKEN 是毫秒时间戳），选择最接近拍照时间的
             val bestMatch = candidates.minByOrNull {
-                kotlin.math.abs(it.dateTaken - photoTimestamp)
+                kotlin.math.abs(it.dateTaken - ts)
             } ?: candidates.first()
 
             // 去重检查：目标目录中是否已有文件名/时间相似的
@@ -377,7 +445,7 @@ class HomeFragment : Fragment() {
             "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND " +
                 "${MediaStore.Images.Media.DISPLAY_NAME} = ? AND " +
                 "${MediaStore.Images.Media.DATE_TAKEN} > ?",
-            arrayOf("Pictures/MeetingTranscriber%", candidate.displayName, timeWindow.toString()),
+            arrayOf("${Camera2CaptureHelper.ALBUM_PATH}%", candidate.displayName, timeWindow.toString()),
             null
         )?.use { cursor ->
             return cursor.count > 0
@@ -391,11 +459,7 @@ class HomeFragment : Fragment() {
             val sourceUri = ContentUris.withAppendedId(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI, candidate.id)
 
-            val destValues = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, "MT_${candidate.displayName}")
-                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MeetingTranscriber")
-            }
+            val destValues = buildPhotoValues("MT_${candidate.displayName}")
             val destUri = resolver.insert(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI, destValues)
                 ?: return
@@ -420,11 +484,7 @@ class HomeFragment : Fragment() {
                 withContext(Dispatchers.IO) {
                     val resolver = requireContext().contentResolver
                     val name = "MT_${cacheFile.name}"
-                    val values = ContentValues().apply {
-                        put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MeetingTranscriber")
-                    }
+                    val values = buildPhotoValues(name)
                     val uri = resolver.insert(
                         MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return@withContext
                     resolver.openOutputStream(uri)?.use { out ->
@@ -531,6 +591,8 @@ class HomeFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        camera2Helper?.closeCamera()
+        camera2Helper = null
         _binding = null
     }
 }

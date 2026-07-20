@@ -16,12 +16,9 @@ import com.example.meetingtranscriber.data.model.TranscriptSegment
 import com.example.meetingtranscriber.databinding.FragmentDetailBinding
 import com.example.meetingtranscriber.ui.export.ExportHelper
 import com.example.meetingtranscriber.util.DebounceTextWatcher
-import com.example.meetingtranscriber.ui.export.QrShareDialog
 import com.example.meetingtranscriber.ui.meeting.TranscriptAdapter
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class DetailFragment : Fragment() {
 
@@ -64,47 +61,18 @@ class DetailFragment : Fragment() {
 
         playerController = AudioPlayerController(binding, viewLifecycleOwner.lifecycleScope)
 
-        binding.btnBack.setOnClickListener {
-            parentFragmentManager.popBackStack()
-        }
-
+        // ── 顶栏 ──
+        binding.btnBack.setOnClickListener { parentFragmentManager.popBackStack() }
         binding.btnExport.setOnClickListener { showExportDialog() }
 
-        binding.btnFormat.setOnClickListener {
-            if (viewModel.hasFormatBackup()) {
-                AlertDialog.Builder(requireContext())
-                    .setTitle("撤销文本规整")
-                    .setMessage("恢复到规整前的原始文本？")
-                    .setPositiveButton("撤销") { _, _ -> viewModel.undoFormat() }
-                    .setNegativeButton("取消", null)
-                    .show()
-            } else {
-                AlertDialog.Builder(requireContext())
-                    .setTitle("文本规整")
-                    .setMessage("将对所有转写文本应用数字格式化和标点规范化（可撤销）")
-                    .setPositiveButton("执行") { _, _ -> viewModel.formatAllSegments() }
-                    .setNegativeButton("取消", null)
-                    .show()
-            }
+        // ── 搜索栏折叠/展开 ──
+        binding.btnSearchToggle.setOnClickListener {
+            binding.layoutSearchBar.visibility =
+                if (binding.layoutSearchBar.visibility == View.VISIBLE) View.GONE
+                else View.VISIBLE
         }
 
-        // 搜索：实时过滤（每次文本变化即搜索）
-        binding.etSearch.addTextChangedListener(
-            DebounceTextWatcher(viewLifecycleOwner.lifecycleScope, 300) { query ->
-                viewModel.search(query)
-            }
-        )
-
-        binding.etSearch.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                viewModel.search(binding.etSearch.text?.toString() ?: "")
-                true
-            } else {
-                false
-            }
-        }
-
-        // 纪要编辑
+        // ── 纪要操作 ──
         binding.btnSaveSummary.setOnClickListener {
             val text = binding.etSummary.text?.toString() ?: ""
             viewModel.saveSummary(text)
@@ -117,7 +85,6 @@ class DetailFragment : Fragment() {
                     if (viewModel.segments.value.isEmpty()) {
                         Toast.makeText(requireContext(), "暂无转写内容，无法生成纪要", Toast.LENGTH_SHORT).show()
                     } else {
-                        // 尚无纪要，直接生成，无需覆盖确认
                         Toast.makeText(requireContext(), "正在生成纪要…", Toast.LENGTH_SHORT).show()
                         viewModel.regenerateSummary()
                     }
@@ -147,26 +114,58 @@ class DetailFragment : Fragment() {
             override fun afterTextChanged(s: android.text.Editable?) {
                 val current = s?.toString() ?: ""
                 val original = viewModel.originalSummary.value
-                // 无原始纪要时，输入非空即视为已编辑（允许手动撰写并保存）
                 viewModel.setSummaryEdited(
                     if (original == null) current.isNotBlank() else current != original
                 )
             }
         })
 
+        // ── 搜索 ──
+        binding.etSearch.addTextChangedListener(
+            DebounceTextWatcher(viewLifecycleOwner.lifecycleScope, 300) { query ->
+                viewModel.search(query)
+            }
+        )
+        binding.etSearch.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                viewModel.search(binding.etSearch.text?.toString() ?: "")
+                true
+            } else false
+        }
+
+        // ── 规整 ──
+        binding.btnFormat.setOnClickListener {
+            if (viewModel.hasFormatBackup()) {
+                AlertDialog.Builder(requireContext())
+                    .setTitle("撤销文本规整")
+                    .setMessage("恢复到规整前的原始文本？")
+                    .setPositiveButton("撤销") { _, _ -> viewModel.undoFormat() }
+                    .setNegativeButton("取消", null)
+                    .show()
+            } else {
+                AlertDialog.Builder(requireContext())
+                    .setTitle("文本规整")
+                    .setMessage("将对所有转写文本应用数字格式化和标点规范化（可撤销）")
+                    .setPositiveButton("执行") { _, _ -> viewModel.formatAllSegments() }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+
         viewModel.loadMeeting(meetingId)
 
+        // ── 数据收集 ──
         viewLifecycleOwner.lifecycleScope.launch {
             launch {
                 viewModel.meeting.collect { meeting ->
                     if (meeting != null) {
                         binding.tvTitle.text = meeting.title
                         binding.tvInfo.text = "${meeting.formattedStartTime} · ${meeting.formattedDuration}"
-                        binding.tvSpeakers.text = "${meeting.speakerCount} 位说话人 · ${meeting.segmentCount} 条记录"
-                        // 纪要区常显：转写 + 纪要合并为一条完整记录
+                        binding.tvSpeakers.text = "${meeting.speakerCount}位说话人 · ${meeting.segmentCount}条"
                         binding.layoutSummary.visibility = View.VISIBLE
+
                         if (meeting.summary.isNullOrBlank()) {
-                            binding.etSummary.hint = "暂无纪要，可点击生成"
+                            binding.etSummary.hint = "暂无纪要，可点击「重新生成」"
                             binding.btnRegenerateSummary.text = "生成纪要"
                         } else if (!viewModel.isSummaryEdited.value) {
                             binding.etSummary.setText(meeting.summary)
@@ -183,7 +182,6 @@ class DetailFragment : Fragment() {
                     }
                 }
             }
-            // 纪要生成/加载完成后刷新展示（meeting StateFlow 同 id 不会重发）
             launch {
                 viewModel.originalSummary.collect { original ->
                     if (original != null) {
@@ -195,14 +193,12 @@ class DetailFragment : Fragment() {
                     }
                 }
             }
-            // 控制规整按钮
             launch {
                 viewModel.segments.collect { segs ->
                     binding.btnFormat.visibility = if (segs.isNotEmpty()) View.VISIBLE else View.GONE
                     binding.btnFormat.text = if (viewModel.hasFormatBackup()) "撤销规整" else "规整"
                 }
             }
-            // 根据搜索状态切换数据源
             launch {
                 combine(viewModel.searchQuery, viewModel.segments, viewModel.searchResults) { query, segments, results ->
                     Triple(query, segments, results)
@@ -218,7 +214,6 @@ class DetailFragment : Fragment() {
         }
     }
 
-    /** 弹出说话人重命名对话框 */
     private fun showRenameDialog(segment: TranscriptSegment) {
         val input = EditText(requireContext())
         input.setText(segment.displaySpeaker)

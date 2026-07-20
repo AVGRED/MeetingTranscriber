@@ -7,15 +7,16 @@
     android:orientation="vertical"
     android:background="@color/background">
 
-    <!-- 返回按钮 -->
+    <!-- 顶栏：返回 + 标题 同行 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingHorizontal="4dp"
-        android:paddingTop="4dp"
-        android:background="@color/surface">
+        android:paddingVertical="2dp"
+        android:background="@color/surface"
+        android:elevation="2dp">
 
         <ImageButton
             android:id="@+id/btn_back"
@@ -24,222 +25,229 @@
             android:src="?attr/actionModeCloseDrawable"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="返回" />
-    </LinearLayout>
-
-    <!-- 顶部信息栏 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingHorizontal="16dp"
-        android:paddingBottom="16dp"
-        android:background="@color/surface"
-        android:elevation="2dp">
 
         <TextView
             android:id="@+id/tv_title"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:textSize="20sp"
+            android:layout_weight="1"
+            android:textSize="16sp"
             android:textStyle="bold"
             android:textColor="@color/on_background"
-            tools:text="会议_2026-05-22_10:30" />
+            android:maxLines="1"
+            android:ellipsize="end"
+            tools:text="会议_07-20_14:30" />
+
+        <Button
+            android:id="@+id/btn_search_toggle"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🔍"
+            android:textSize="14sp"
+            android:textColor="@color/primary" />
+
+        <Button
+            android:id="@+id/btn_export"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="导出"
+            android:textSize="12sp"
+            android:textColor="@color/primary" />
+    </LinearLayout>
+
+    <!-- 信息行 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="4dp"
+        android:background="@color/surface"
+        android:gravity="center_vertical">
 
         <TextView
             android:id="@+id/tv_info"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="13sp"
-            android:textColor="@color/on_surface"
-            android:layout_marginTop="4dp"
-            tools:text="2026-05-22 10:30 · 45分30秒" />
+            android:textSize="12sp"
+            android:textColor="@color/on_surface_variant"
+            tools:text="2026-07-20 14:30 · 45分30秒" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" · "
+            android:textSize="12sp"
+            android:textColor="@color/outline" />
 
         <TextView
             android:id="@+id/tv_speakers"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textSize="12sp"
-            android:textColor="@color/interim_text"
-            android:layout_marginTop="2dp"
-            tools:text="3 位说话人 · 128 条记录" />
+            android:textColor="@color/on_surface_variant"
+            tools:text="3位说话人 · 128条" />
+    </LinearLayout>
 
-        <!-- 纪要区 -->
-        <LinearLayout
-            android:id="@+id/layout_summary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="12dp"
-            android:padding="12dp"
-            android:background="@drawable/summary_bg"
-            android:visibility="gone"
-            tools:visibility="visible">
+    <!-- ═══ 搜索栏（默认隐藏） ═══ -->
+    <LinearLayout
+        android:id="@+id/layout_search_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="3dp"
+        android:gravity="center_vertical"
+        android:visibility="gone">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="会议纪要"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/on_surface"
-                android:layout_marginBottom="8dp" />
-
-            <EditText
-                android:id="@+id/et_summary"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="100dp"
-                android:maxHeight="160dp"
-                android:gravity="top|start"
-                android:textSize="14sp"
-                android:textColor="@color/on_background"
-                android:lineSpacingExtra="4dp"
-                android:inputType="textMultiLine|textAutoCorrect"
-                android:background="@null"
-                tools:text="会议讨论了Q2产品规划方向，确定了三个重点项目的优先级..." />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="end"
-                android:layout_marginTop="8dp">
-
-                <Button
-                    android:id="@+id/btn_regenerate_summary"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="重新生成"
-                    android:textSize="12sp"
-                    android:textColor="@color/accent" />
-
-                <Button
-                    android:id="@+id/btn_save_summary"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="保存"
-                    android:textSize="12sp"
-                    android:textColor="@color/primary" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- 录音回放区域 -->
-        <LinearLayout
-            android:id="@+id/layout_audio_section"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="12dp"
-            android:padding="10dp"
+        <EditText
+            android:id="@+id/et_search"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:hint="搜索转写..."
+            android:paddingHorizontal="10dp"
             android:background="@drawable/search_bg"
-            android:visibility="gone"
-            tools:visibility="visible">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🎙️ 录音回放"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/on_surface" />
-
-            <LinearLayout
-                android:id="@+id/layout_player"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginTop="6dp">
-
-                <ImageButton
-                    android:id="@+id/btn_play"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:src="@android:drawable/ic_media_play"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:enabled="false"
-                    android:contentDescription="播放录音" />
-
-                <SeekBar
-                    android:id="@+id/seek_audio"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:enabled="false" />
-
-                <TextView
-                    android:id="@+id/tv_audio_time"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textSize="12sp"
-                    android:textColor="@color/on_surface"
-                    tools:text="00:00 / 45:30" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- 录音缺失提示 -->
-        <TextView
-            android:id="@+id/tv_audio_missing"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:padding="10dp"
-            android:background="@drawable/search_bg"
-            android:text="📭 该会议无录音文件"
             android:textSize="13sp"
-            android:textColor="@color/interim_text"
-            android:visibility="gone" />
+            android:imeOptions="actionSearch"
+            android:inputType="text" />
 
-        <!-- 搜索 + 导出 -->
+        <Button
+            android:id="@+id/btn_format"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="规整"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- ═══ 纪要区（填满上部剩余空间） ═══ -->
+    <LinearLayout
+        android:id="@+id/layout_summary"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
+        android:background="@color/surface_variant"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📝 纪要"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/on_surface"
+            android:layout_marginBottom="2dp" />
+
+        <EditText
+            android:id="@+id/et_summary"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="top|start"
+            android:textSize="13sp"
+            android:textColor="@color/on_background"
+            android:lineSpacingExtra="2dp"
+            android:inputType="textMultiLine|textAutoCorrect"
+            android:background="@null"
+            android:padding="2dp"
+            android:scrollbars="vertical"
+            tools:text="会议讨论了Q2产品规划方向..." />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical">
-
-            <EditText
-                android:id="@+id/et_search"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_weight="1"
-                android:hint="搜索转写内容..."
-                android:paddingHorizontal="12dp"
-                android:background="@drawable/search_bg"
-                android:textSize="14sp"
-                android:imeOptions="actionSearch"
-                android:inputType="text" />
+            android:gravity="end">
 
             <Button
-                android:id="@+id/btn_format"
+                android:id="@+id/btn_regenerate_summary"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="规整"
-                android:textColor="@color/accent"
+                android:text="重新生成"
                 android:textSize="12sp"
-                android:visibility="gone" />
+                android:textColor="@color/accent" />
 
             <Button
-                android:id="@+id/btn_export"
+                android:id="@+id/btn_save_summary"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="导出"
+                android:text="保存"
+                android:textSize="12sp"
                 android:textColor="@color/primary" />
-
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 转写列表 -->
+    <!-- ═══ 录音回放区 ═══ -->
+    <LinearLayout
+        android:id="@+id/layout_audio_section"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
+        android:background="@color/surface"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <ImageButton
+            android:id="@+id/btn_play"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_media_play"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:enabled="false"
+            android:contentDescription="播放录音" />
+
+        <SeekBar
+            android:id="@+id/seek_audio"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginHorizontal="8dp"
+            android:enabled="false" />
+
+        <TextView
+            android:id="@+id/tv_audio_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:textColor="@color/on_surface_variant"
+            tools:text="12:30 / 45:30" />
+    </LinearLayout>
+
+    <!-- 录音缺失提示 -->
+    <TextView
+        android:id="@+id/tv_audio_missing"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
+        android:background="@color/surface"
+        android:text="📭 无录音文件"
+        android:textSize="12sp"
+        android:textColor="@color/interim_text"
+        android:visibility="gone" />
+
+    <!-- ═══ 转写列表（底部固定高度） ═══ -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv_transcript"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:padding="12dp"
+        android:layout_height="180dp"
+        android:paddingHorizontal="12dp"
+        android:paddingTop="2dp"
         android:clipToPadding="false"
         tools:listitem="@layout/item_transcript_segment" />
 
