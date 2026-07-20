@@ -26,4 +26,12 @@
         <item name="android:statusBarColor">@color/surface</item>
         <item name="android:navigationBarColor">@color/surface</item>
     </style>
+
+    <style name="Theme.MeetingTranscriber.Fullscreen" parent="Theme.MeetingTranscriber">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+        <item name="android:navigationBarDividerColor">@android:color/black</item>
+    </style>
 </resources>

@@ -40,6 +40,12 @@
 -keep class androidx.security.crypto.** { *; }
 -dontwarn androidx.security.crypto.**
 
+# CameraX
+-keep class androidx.camera.** { *; }
+-keepclassmembers class androidx.camera.** { *; }
+-dontwarn androidx.camera.**
+-dontwarn com.google.common.util.concurrent.ListenableFuture
+
 # 剥离 release 热路径调试日志（interim decode 每 250ms、VAD 状态翻转、逐句累计
 # 等 Log.d 在 release 存活是无谓开销）。只剥 v/d，保留 i/w/e 供现场诊断
 -assumenosideeffects class android.util.Log {

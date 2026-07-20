@@ -18,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
+import com.example.meetingtranscriber.ui.camera.CameraCaptureActivity
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -162,21 +163,26 @@ class HomeFragment : Fragment() {
     }
 
     /**
-     * 拍照主入口：自适应选择最佳策略
-     *
-     * 策略优先级：
-     * 1. Pixel/原生 Android → MediaStore URI (IS_PENDING)，兼容性最好
-     * 2. 三星 → MediaStore URI (IS_PENDING)，三星相机通常尊重
-     * 3. 小米/华为/OPPO/vivo → MediaStore URI (NO IS_PENDING) + FileProvider 兜底
+     * 拍照主入口：优先使用应用内相机 (CameraX)，失败时降级到系统相机
      */
     private fun takePhoto() {
-        // 检查相机可用性
         val pm = requireContext().packageManager
         if (!pm.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY)) {
             Toast.makeText(requireContext(), "此设备没有相机", Toast.LENGTH_SHORT).show()
             return
         }
 
+        try {
+            startActivity(Intent(requireContext(), CameraCaptureActivity::class.java))
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "CameraX 启动失败: ${e.message}")
+            takePhotoLegacy()
+        }
+    }
+
+    /** 系统相机兜底策略 */
+    private fun takePhotoLegacy() {
+        val pm = requireContext().packageManager
         val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
         if (intent.resolveActivity(pm) == null) {
             Toast.makeText(requireContext(), "未找到相机应用", Toast.LENGTH_SHORT).show()
@@ -185,22 +191,17 @@ class HomeFragment : Fragment() {
 
         photoTimestamp = System.currentTimeMillis()
         val manufacturer = getManufacturer()
-
-        // 清理之前的相机缓存
         cleanCameraCache()
 
         when {
-            // 策略 A：已知忽略 URI 的 OEM → 同时准备 FileProvider 兜底
             URI_IGNORING_OEMS.any { manufacturer.contains(it) } -> {
                 android.util.Log.i(TAG, "检测到 ${manufacturer}，使用双通道策略")
                 takePhotoWithFallback()
             }
-            // 策略 B：三星 → IS_PENDING 模式
             manufacturer.contains("samsung") -> {
                 android.util.Log.i(TAG, "三星设备，使用 IS_PENDING 策略")
                 takePhotoWithPendingFlag()
             }
-            // 策略 C：原生/Pixel → IS_PENDING 模式
             else -> {
                 android.util.Log.i(TAG, "标准设备 ($manufacturer)，使用 IS_PENDING 策略")
                 takePhotoWithPendingFlag()

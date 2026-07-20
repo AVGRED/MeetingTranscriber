@@ -117,6 +117,11 @@ dependencies {
     // --- 协程 ---
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
+    // --- CameraX (应用内相机拍照) ---
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+
     // --- 局域网分享 ---
     implementation("com.google.zxing:core:3.5.3")      // 二维码位图生成（纯 Java，无需相机）
     implementation("org.nanohttpd:nanohttpd:2.3.1")    // 局域网 HTTP 服务
