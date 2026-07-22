@@ -60,15 +60,21 @@ actual object AudioCacheManager {
             val kept = files.filter { f ->
                 val drop = !f.isFile || f.name.endsWith(".tmp") ||
                     now - f.lastModified() > MAX_AGE_MS
-                if (drop) f.deleteRecursively()
+                if (drop) {
+                    if (!f.deleteRecursively()) Napier.w("AudioCacheManager: 无法删除缓存文件 ${f.absolutePath}")
+                }
                 !drop
             }
             var totalBytes = kept.sumOf { it.length() }
             if (totalBytes > MAX_CACHE_BYTES) {
                 for (f in kept.sortedBy { it.lastModified() }) {
                     if (totalBytes <= MAX_CACHE_BYTES) break
-                    totalBytes -= f.length()
-                    f.delete()
+                    val size = f.length()
+                    if (f.delete()) {
+                        totalBytes -= size
+                    } else {
+                        Napier.w("AudioCacheManager: 无法删除缓存文件 ${f.absolutePath}")
+                    }
                 }
             }
         } catch (e: Exception) {

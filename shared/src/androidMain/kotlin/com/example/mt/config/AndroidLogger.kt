@@ -12,14 +12,15 @@ import io.github.aakira.napier.LogLevel
  */
 class AndroidLogger : Antilog() {
     override fun performLog(priority: LogLevel, tag: String?, throwable: Throwable?, message: String?) {
+        val t = tag ?: "MT"
+        val msg = message ?: ""
         when (priority) {
-            LogLevel.VERBOSE -> Log.v(tag ?: "MT", message ?: "")
-            LogLevel.DEBUG -> Log.d(tag ?: "MT", message ?: "")
-            LogLevel.INFO -> Log.i(tag ?: "MT", message ?: "")
-            LogLevel.WARNING -> Log.w(tag ?: "MT", message ?: "")
-            LogLevel.ERROR -> Log.e(tag ?: "MT", message ?: "")
-            LogLevel.ASSERT -> Log.wtf(tag ?: "MT", message ?: "")
+            LogLevel.VERBOSE -> Log.v(t, msg, throwable)
+            LogLevel.DEBUG -> Log.d(t, msg, throwable)
+            LogLevel.INFO -> Log.i(t, msg, throwable)
+            LogLevel.WARNING -> Log.w(t, msg, throwable)
+            LogLevel.ERROR -> Log.e(t, msg, throwable)
+            LogLevel.ASSERT -> Log.wtf(t, msg, throwable)
         }
-        throwable?.let { Log.e(tag ?: "MT", throwable) }
     }
 }

@@ -25,7 +25,7 @@ INSERT INTO meetings (title, startTime, endTime, durationSeconds, speakerCount, 
 VALUES (:title, :startTime, :endTime, :durationSeconds, :speakerCount, :segmentCount, :summary,
     :isOffline, :audioFilePath, :isArchived, :archivedAt, :tag, :asrEngineType, :llmEngineType, :dialectUsed);
 
--- 取最近一条插入的 id
+-- 取最近一条插入的 id（connection-local，单线程安全）
 lastInsertId:
 SELECT last_insert_rowid();
 
@@ -60,6 +60,10 @@ UPDATE meetings SET title = ? WHERE id = ?;
 -- 更新纪要
 updateSummary:
 UPDATE meetings SET summary = ?, llmEngineType = ? WHERE id = ?;
+
+-- 仅更新纪要文本（不改引擎类型）
+updateSummaryText:
+UPDATE meetings SET summary = ? WHERE id = ?;
 
 -- 结束会议
 finishMeeting:

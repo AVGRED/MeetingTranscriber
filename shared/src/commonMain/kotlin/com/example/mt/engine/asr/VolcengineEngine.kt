@@ -38,7 +38,6 @@ class VolcengineEngine(
     @Volatile private var webSocket: WebSocket? = null
     private var connectId: String = ""
     private var sentenceCounter: Long = 0
-    private var audioSeq: Int = 0
     private val webSocketReady = AtomicBoolean(false)
 
     private val audioBuffer = Channel<ByteArray>(EngineConstants.MAX_BUFFER_FRAMES)
@@ -89,7 +88,6 @@ class VolcengineEngine(
         return try {
             connectId = UUID.randomUUID().toString()
             sentenceCounter = 0
-            audioSeq = 0
             _interimText.value = ""
             webSocketReady.set(false)
             reconnectHandler.reset()
@@ -113,8 +111,7 @@ class VolcengineEngine(
         if (webSocket != null && webSocketReady.get()) {
             try {
                 val compressed = gzipCompress(pcmData)
-                audioSeq++
-                val frame = buildAudioFrame(compressed, audioSeq, last = false)
+                val frame = buildAudioFrame(compressed, last = false)
                 webSocket?.send(ByteString.of(*frame))
             } catch (e: Exception) {
                 Napier.w("$TAG: 发送音频帧失败: ${e.message}")
@@ -241,7 +238,6 @@ class VolcengineEngine(
 
         webSocketReady.set(false)
         reconnectHandler.start { attempt ->
-            audioSeq = 0
             _engineStatus.value = EngineStatus(EngineState.LOADING,
                 "正在重连 ($attempt/${EngineConstants.MAX_RECONNECT_ATTEMPTS})...")
             openWebSocket(config)
@@ -285,7 +281,7 @@ class VolcengineEngine(
         return header + sizeBytes + payload
     }
 
-    private fun buildAudioFrame(compressedAudio: ByteArray, seq: Int, last: Boolean): ByteArray {
+    private fun buildAudioFrame(compressedAudio: ByteArray, last: Boolean): ByteArray {
         val flags = if (last) FLAG_LAST else FLAG_NONE
         return buildClientFrame(MSG_AUDIO_ONLY, flags, SER_NONE, COMP_GZIP, compressedAudio)
     }
@@ -355,8 +351,7 @@ class VolcengineEngine(
             val data = audioBuffer.tryReceive().getOrNull() ?: break
             try {
                 val compressed = gzipCompress(data)
-                audioSeq++
-                val frame = buildAudioFrame(compressed, audioSeq, last = false)
+                val frame = buildAudioFrame(compressed, last = false)
                 webSocket?.send(ByteString.of(*frame))
                 sent++
             } catch (e: Exception) {
@@ -502,7 +497,6 @@ class VolcengineEngine(
 
         // 标志位
         private const val FLAG_NONE = 0x0
-        private const val FLAG_POS_SEQ = 0x1
         private const val FLAG_LAST = 0x2
         private const val FLAG_SERVER_FINAL = 0x3
 

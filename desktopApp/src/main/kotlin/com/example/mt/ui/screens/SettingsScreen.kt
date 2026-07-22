@@ -7,41 +7,35 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.mt.config.KvKeys
 import com.example.mt.engine.AsrEngineType
 import com.example.mt.engine.LlmEngineType
 import com.example.mt.engine.SummaryStyle
 import com.example.mt.platform.PlatformKeyValueStore
-
-// KV Store 键名
-private const val KEY_PREFERRED_ASR = "preferred_asr_engine"
-private const val KEY_PREFERRED_LLM = "preferred_llm_engine"
-private const val KEY_AUTO_FALLBACK = "auto_fallback"
-private const val KEY_SUMMARY_STYLE = "summary_style"
-private const val KEY_BACKGROUND_SILENT = "background_silent"
 
 @Composable
 fun SettingsScreen(kvStore: PlatformKeyValueStore) {
     // 从 KV Store 读取当前设置
     var preferredAsr by remember {
         mutableStateOf(
-            try { AsrEngineType.valueOf(kvStore.getString(KEY_PREFERRED_ASR, AsrEngineType.VOLCENGINE_CLOUD.name)) }
+            try { AsrEngineType.valueOf(kvStore.getString(KvKeys.PREFERRED_ASR_ENGINE, AsrEngineType.VOLCENGINE_CLOUD.name)) }
             catch (_: Exception) { AsrEngineType.VOLCENGINE_CLOUD }
         )
     }
     var preferredLlm by remember {
         mutableStateOf(
-            try { LlmEngineType.valueOf(kvStore.getString(KEY_PREFERRED_LLM, LlmEngineType.DOUBAO_CLOUD.name)) }
+            try { LlmEngineType.valueOf(kvStore.getString(KvKeys.PREFERRED_LLM_ENGINE, LlmEngineType.DOUBAO_CLOUD.name)) }
             catch (_: Exception) { LlmEngineType.DOUBAO_CLOUD }
         )
     }
-    var autoFallback by remember { mutableStateOf(kvStore.getBoolean(KEY_AUTO_FALLBACK, true)) }
+    var autoFallback by remember { mutableStateOf(kvStore.getBoolean(KvKeys.AUTO_FALLBACK, true)) }
     var summaryStyle by remember {
         mutableStateOf(
-            try { SummaryStyle.valueOf(kvStore.getString(KEY_SUMMARY_STYLE, SummaryStyle.STANDARD.name)) }
+            try { SummaryStyle.valueOf(kvStore.getString(KvKeys.SUMMARY_STYLE, SummaryStyle.STANDARD.name)) }
             catch (_: Exception) { SummaryStyle.STANDARD }
         )
     }
-    var backgroundSilent by remember { mutableStateOf(kvStore.getBoolean(KEY_BACKGROUND_SILENT, false)) }
+    var backgroundSilent by remember { mutableStateOf(kvStore.getBoolean(KvKeys.BACKGROUND_SILENT, false)) }
 
     var asrExpanded by remember { mutableStateOf(false) }
     var llmExpanded by remember { mutableStateOf(false) }
@@ -79,7 +73,7 @@ fun SettingsScreen(kvStore: PlatformKeyValueStore) {
                         text = { Text(engineType.displayName) },
                         onClick = {
                             preferredAsr = engineType
-                            kvStore.putString(KEY_PREFERRED_ASR, engineType.name)
+                            kvStore.putString(KvKeys.PREFERRED_ASR_ENGINE, engineType.name)
                             asrExpanded = false
                         },
                     )
@@ -112,7 +106,7 @@ fun SettingsScreen(kvStore: PlatformKeyValueStore) {
                         text = { Text(engineType.displayName) },
                         onClick = {
                             preferredLlm = engineType
-                            kvStore.putString(KEY_PREFERRED_LLM, engineType.name)
+                            kvStore.putString(KvKeys.PREFERRED_LLM_ENGINE, engineType.name)
                             llmExpanded = false
                         },
                     )
@@ -145,7 +139,7 @@ fun SettingsScreen(kvStore: PlatformKeyValueStore) {
                         text = { Text(style.label) },
                         onClick = {
                             summaryStyle = style
-                            kvStore.putString(KEY_SUMMARY_STYLE, style.name)
+                            kvStore.putString(KvKeys.SUMMARY_STYLE, style.name)
                             styleExpanded = false
                         },
                     )
@@ -172,7 +166,7 @@ fun SettingsScreen(kvStore: PlatformKeyValueStore) {
                 checked = autoFallback,
                 onCheckedChange = {
                     autoFallback = it
-                    kvStore.putBoolean(KEY_AUTO_FALLBACK, it)
+                    kvStore.putBoolean(KvKeys.AUTO_FALLBACK, it)
                 },
             )
         }
@@ -195,7 +189,7 @@ fun SettingsScreen(kvStore: PlatformKeyValueStore) {
                 checked = backgroundSilent,
                 onCheckedChange = {
                     backgroundSilent = it
-                    kvStore.putBoolean(KEY_BACKGROUND_SILENT, it)
+                    kvStore.putBoolean(KvKeys.BACKGROUND_SILENT, it)
                 },
             )
         }

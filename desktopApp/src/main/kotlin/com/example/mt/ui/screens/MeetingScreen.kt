@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.mt.config.EngineKeys
+import com.example.mt.config.KvKeys
 import com.example.mt.data.repository.MeetingRepository
 import com.example.mt.data.repository.TranscriptRepository
 import com.example.mt.domain.SummaryUseCase
@@ -32,6 +33,7 @@ fun MeetingScreen(
     db: PlatformDatabase,
     kvStore: PlatformKeyValueStore,
     fileAccess: FileAccess,
+    onMeetingActiveChanged: (Boolean) -> Unit = {},
 ) {
     // ── 构建依赖 ──
     val viewModel = remember {
@@ -39,36 +41,36 @@ fun MeetingScreen(
         val transcriptRepo = TranscriptRepository(db.transcriptQueries)
 
         val engineKeys = EngineKeys(
-            tingwuAccessKeyId = kvStore.getString("tingwu_access_key_id"),
-            tingwuAccessKeySecret = kvStore.getString("tingwu_access_key_secret"),
-            tingwuAppKey = kvStore.getString("tingwu_app_key"),
-            volcengineAsrApiKey = kvStore.getString("volcengine_asr_api_key"),
-            volcengineAsrAccessToken = kvStore.getString("volcengine_asr_access_token"),
-            arkApiKey = kvStore.getString("ark_api_key"),
-            arkEndpointId = kvStore.getString("ark_endpoint_id"),
-            dashScopeApiKey = kvStore.getString("dashscope_api_key"),
+            tingwuAccessKeyId = kvStore.getString(KvKeys.TINGWU_ACCESS_KEY_ID),
+            tingwuAccessKeySecret = kvStore.getString(KvKeys.TINGWU_ACCESS_KEY_SECRET),
+            tingwuAppKey = kvStore.getString(KvKeys.TINGWU_APP_KEY),
+            volcengineAsrApiKey = kvStore.getString(KvKeys.VOLCENGINE_ASR_API_KEY),
+            volcengineAsrAccessToken = kvStore.getString(KvKeys.VOLCENGINE_ASR_ACCESS_TOKEN),
+            arkApiKey = kvStore.getString(KvKeys.ARK_API_KEY),
+            arkEndpointId = kvStore.getString(KvKeys.ARK_ENDPOINT_ID),
+            dashScopeApiKey = kvStore.getString(KvKeys.DASHSCOPE_API_KEY),
             preferredAsrEngine = try {
                 com.example.mt.engine.AsrEngineType.valueOf(
-                    kvStore.getString("preferred_asr_engine", "VOLCENGINE_CLOUD")
+                    kvStore.getString(KvKeys.PREFERRED_ASR_ENGINE, "VOLCENGINE_CLOUD")
                 )
             } catch (_: Exception) { com.example.mt.engine.AsrEngineType.VOLCENGINE_CLOUD },
             preferredLlmEngine = try {
                 com.example.mt.engine.LlmEngineType.valueOf(
-                    kvStore.getString("preferred_llm_engine", "DOUBAO_CLOUD")
+                    kvStore.getString(KvKeys.PREFERRED_LLM_ENGINE, "DOUBAO_CLOUD")
                 )
             } catch (_: Exception) { com.example.mt.engine.LlmEngineType.DOUBAO_CLOUD },
-            autoFallback = kvStore.getBoolean("auto_fallback", true),
+            autoFallback = kvStore.getBoolean(KvKeys.AUTO_FALLBACK, true),
             summaryStyle = try {
                 com.example.mt.engine.SummaryStyle.valueOf(
-                    kvStore.getString("summary_style", "STANDARD")
+                    kvStore.getString(KvKeys.SUMMARY_STYLE, "STANDARD")
                 )
             } catch (_: Exception) { com.example.mt.engine.SummaryStyle.STANDARD },
-            backgroundSilent = kvStore.getBoolean("background_silent", false),
+            backgroundSilent = kvStore.getBoolean(KvKeys.BACKGROUND_SILENT, false),
             llmApiKeys = mapOf(
-                com.example.mt.engine.LlmEngineType.DEEPSEEK_CLOUD to kvStore.getString("deepseek_api_key"),
-                com.example.mt.engine.LlmEngineType.KIMI_CLOUD to kvStore.getString("kimi_api_key"),
-                com.example.mt.engine.LlmEngineType.ZHIPU_CLOUD to kvStore.getString("zhipu_api_key"),
-                com.example.mt.engine.LlmEngineType.SILICONFLOW_CLOUD to kvStore.getString("siliconflow_api_key"),
+                com.example.mt.engine.LlmEngineType.DEEPSEEK_CLOUD to kvStore.getString(KvKeys.DEEPSEEK_API_KEY),
+                com.example.mt.engine.LlmEngineType.KIMI_CLOUD to kvStore.getString(KvKeys.KIMI_API_KEY),
+                com.example.mt.engine.LlmEngineType.ZHIPU_CLOUD to kvStore.getString(KvKeys.ZHIPU_API_KEY),
+                com.example.mt.engine.LlmEngineType.SILICONFLOW_CLOUD to kvStore.getString(KvKeys.SILICONFLOW_API_KEY),
             ).filterValues { it.isNotBlank() },
         )
 
@@ -106,11 +108,26 @@ fun MeetingScreen(
     val uiState by viewModel.uiState.collectAsState()
     val segments by viewModel.transcriptSegments.collectAsState()
 
-    // 自动滚到底部
+    // 向父组件报告会议活动状态变化
+    LaunchedEffect(uiState.isMeetingActive) {
+        onMeetingActiveChanged(uiState.isMeetingActive)
+    }
+
+    // 退出时清除活动状态
+    DisposableEffect(Unit) {
+        onDispose { onMeetingActiveChanged(false) }
+    }
+
+    // 仅当用户已在底部附近时自动滚到底部（不强制抢夺滚动位置）
     val listState = rememberLazyListState()
     LaunchedEffect(segments.size) {
         if (segments.isNotEmpty()) {
-            listState.animateScrollToItem(segments.size - 1)
+            val layout = listState.layoutInfo
+            val lastVisible = layout.visibleItemsInfo.lastOrNull()
+            val isNearBottom = lastVisible != null && lastVisible.index >= layout.totalItemsCount - 3
+            if (isNearBottom) {
+                listState.animateScrollToItem(segments.size - 1)
+            }
         }
     }
 

@@ -18,7 +18,12 @@ actual class VoiceprintModelLoader actual constructor() {
         return try {
             extractor = SpeakerEmbeddingExtractor(
                 modelPath,
-                SpeakerEmbeddingExtractorConfig(modelPath, 1, false, "cpu")
+                SpeakerEmbeddingExtractorConfig(
+                    model = modelPath,
+                    numThreads = 1,
+                    debug = false,
+                    provider = "cpu",
+                )
             )
             true
         } catch (e: UnsatisfiedLinkError) {

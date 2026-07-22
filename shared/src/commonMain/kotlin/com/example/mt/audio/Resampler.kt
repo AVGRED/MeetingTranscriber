@@ -8,7 +8,7 @@ package com.example.mt.audio
  * - 采样率转换：48kHz → 16kHz（factor=3 抽取）
  *
  * 算法简单直接，ASR 场景音质足够：
- * - 下混：(L+R)/2 防溢出用右移代替除法
+ * - 下混：(L+R)/2（已转为 Int 避免溢出）
  * - 抽取：每 3 个立体声采样点取 1 个（subsample）
  *
  * 输入 (100ms @ 48kHz stereo): 19200 bytes → 输出 (100ms @ 16kHz mono): 3200 bytes
@@ -40,7 +40,8 @@ object Resampler {
             val r = ((input[inIdx + 2].toInt() and 0xFF)
                     or ((input[inIdx + 3].toInt() and 0xFF) shl 8)).toShort()
 
-            val mono = ((l.toInt() + r.toInt()) shr 1).toShort()
+            // 使用整数除法（截断向零）避免 shr 对负数的向下取整偏置
+            val mono = ((l.toInt() + r.toInt()) / 2).toShort()
 
             output[outIdx] = (mono.toInt() and 0xFF).toByte()
             output[outIdx + 1] = ((mono.toInt() shr 8) and 0xFF).toByte()

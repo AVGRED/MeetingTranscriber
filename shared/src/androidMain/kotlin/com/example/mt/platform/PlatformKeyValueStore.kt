@@ -2,6 +2,7 @@ package com.example.mt.platform
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
@@ -21,6 +22,7 @@ actual class PlatformKeyValueStore actual constructor(private val name: String) 
         ctx.getSharedPreferences("${name}_plain", Context.MODE_PRIVATE)
     }
 
+    @Volatile
     private var cachedSecurePrefs: SharedPreferences? = null
 
     private fun obtainSecurePrefs(): SharedPreferences {
@@ -37,7 +39,10 @@ actual class PlatformKeyValueStore actual constructor(private val name: String) 
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
             } catch (e: Exception) {
-                ctx.getSharedPreferences("${name}_secure", Context.MODE_PRIVATE)
+                Log.w("PlatformKeyValueStore",
+                    "EncryptedSharedPreferences 初始化失败，API Key 将以非加密方式存储", e)
+                // 使用独立的名字避免与加密存储冲突（防止加密恢复后数据"消失"）
+                ctx.getSharedPreferences("${name}_secure_fallback_plaintext", Context.MODE_PRIVATE)
             }
             cachedSecurePrefs = prefs
             return prefs

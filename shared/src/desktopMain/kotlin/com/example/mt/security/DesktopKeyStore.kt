@@ -17,7 +17,7 @@ import javax.crypto.spec.SecretKeySpec
  */
 class DesktopKeyStore(
     private val masterKeyFile: File = File(
-        System.getProperty("user.home"),
+        System.getProperty("user.home") ?: System.getProperty("java.io.tmpdir") ?: ".",
         "MeetingTranscriber/data/.masterkey"
     ),
 ) {
@@ -55,7 +55,13 @@ class DesktopKeyStore(
             cipher.init(Cipher.DECRYPT_MODE, masterKey, spec)
 
             String(cipher.doFinal(ciphertext), Charsets.UTF_8)
-        } catch (_: Exception) {
+        } catch (e: IllegalArgumentException) {
+            // 解码失败（数据损坏/篡改）vs 密钥损坏——不同模因
+            System.err.println("DesktopKeyStore: decrypt failed (data corrupt/tampered): ${e.message}")
+            null
+        } catch (e: Exception) {
+            System.err.println("DesktopKeyStore: decrypt failed: ${e.message}")
+            e.printStackTrace()
             null
         }
     }

@@ -3,7 +3,8 @@ build/
 **/build/
 *.iml
 .idea/
-.gradle/
+*.db
+*.sqlite
 local.properties
 *.jks
 *.keystore

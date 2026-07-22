@@ -45,6 +45,27 @@ fun AppNavigation(
     fileAccess: FileAccess,
 ) {
     var currentScreen by remember { mutableStateOf(Screen.HOME) }
+    var hasActiveMeeting by remember { mutableStateOf(false) }
+    var pendingScreen by remember { mutableStateOf<Screen?>(null) }
+
+    // 离开会议确认弹窗
+    pendingScreen?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingScreen = null },
+            title = { Text("离开会议页面？") },
+            text = { Text("当前有正在进行的会议，切换页面将导致录制和转写数据丢失。确定要离开吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingScreen = null
+                    hasActiveMeeting = false
+                    currentScreen = target
+                }) { Text("确定离开") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingScreen = null }) { Text("取消") }
+            },
+        )
+    }
 
     Row(modifier = Modifier.fillMaxSize()) {
         // 侧边导航栏
@@ -64,7 +85,13 @@ fun AppNavigation(
                     },
                     label = { Text(item.screen.label) },
                     selected = currentScreen == item.screen,
-                    onClick = { currentScreen = item.screen },
+                    onClick = {
+                        if (item.screen != Screen.MEETING && hasActiveMeeting) {
+                            pendingScreen = item.screen
+                        } else {
+                            currentScreen = item.screen
+                        }
+                    },
                 )
             }
         }
@@ -84,6 +111,7 @@ fun AppNavigation(
                     db = db,
                     kvStore = kvStore,
                     fileAccess = fileAccess,
+                    onMeetingActiveChanged = { active -> hasActiveMeeting = active },
                 )
                 Screen.HISTORY -> HistoryScreen(db = db)
                 Screen.SETTINGS -> SettingsScreen(kvStore = kvStore)

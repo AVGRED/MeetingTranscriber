@@ -55,7 +55,8 @@ class LanShareServer private constructor(
             for ((i, port) in ports.withIndex()) {
                 try {
                     return LanShareServer(port, token, meetingTitle, files).apply {
-                        start(SOCKET_READ_TIMEOUT, false)
+                        // NanoHTTPD.SOCKET_READ_TIMEOUT (inherited constant, default 5000ms)
+                        start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
                     }
                 } catch (e: IOException) {
                     if (port == 0 && i == ports.lastIndex) {

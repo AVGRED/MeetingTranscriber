@@ -106,6 +106,10 @@ actual class PlatformAudioCapture actual constructor() {
                         _audioStream.emit(output.copyOfRange(0, CHUNK_SIZE))
                     }
                 } else if (read < 0) break
+                // read == 0 是合法的（暂无可读数据），短暂 yield 后重试
+                else if (read == 0) {
+                    kotlinx.coroutines.yield()
+                }
             }
         }
         return true

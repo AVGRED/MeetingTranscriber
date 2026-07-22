@@ -81,6 +81,10 @@ class DashScopeEngine(
                     put("input", JSONObject().apply {
                         put("messages", JSONArray().apply {
                             put(JSONObject().apply {
+                                put("role", "system")
+                                put("content", PromptBuilder.SYSTEM_PROMPT)
+                            })
+                            put(JSONObject().apply {
                                 put("role", "user")
                                 put("content", prompt)
                             })
@@ -144,9 +148,7 @@ class DashScopeEngine(
                 _engineStatus.value = EngineStatus(EngineState.ERROR, "异常: ${e.message}")
                 Result.failure(e)
             } finally {
-                if (_engineStatus.value.state == EngineState.RUNNING) {
-                    _generationProgress.value = 0f
-                }
+                _generationProgress.value = 0f
             }
         }
 

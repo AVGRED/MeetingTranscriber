@@ -45,7 +45,7 @@ class DoubaoEngine(
 
         _engineStatus.value = EngineStatus(EngineState.LOADING, "正在验证豆包 API Key...")
 
-        if (resolveArkApiKey().isBlank()) {
+        if (keys.arkApiKey.isBlank()) {
             val msg = "火山方舟 API Key 未配置"
             Napier.w("$TAG: $msg")
             _engineStatus.value = EngineStatus(EngineState.ERROR, msg)
@@ -70,7 +70,7 @@ class DoubaoEngine(
             _generationProgress.value = 0f
 
             try {
-                val apiKey = resolveArkApiKey()
+                val apiKey = keys.arkApiKey
                 val endpointId = keys.arkEndpointId.ifBlank { DEFAULT_MODEL }
                 val prompt = PromptBuilder.build(transcript, style)
 
@@ -143,9 +143,7 @@ class DoubaoEngine(
                 _engineStatus.value = EngineStatus(EngineState.ERROR, "异常: ${e.message}")
                 Result.failure(e)
             } finally {
-                if (_engineStatus.value.state == EngineState.RUNNING) {
-                    _generationProgress.value = 0f
-                }
+                _generationProgress.value = 0f
             }
         }
 
@@ -161,8 +159,6 @@ class DoubaoEngine(
         activeCall = null
         Napier.i("$TAG: 豆包 LLM 引擎已释放")
     }
-
-    private fun resolveArkApiKey(): String = keys.arkApiKey
 
     companion object {
         private const val TAG = "DoubaoEngine"

@@ -1,5 +1,6 @@
 package com.example.mt.network
 
+import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -22,7 +23,12 @@ object AliyunSigner {
     ): String {
         val accept = "application/json"
         val contentType = "application/json; charset=utf-8"
-        val contentMD5 = ""
+
+        // 计算 content-MD5（如有 body）
+        val contentMD5 = if (body.isNotBlank()) {
+            val md5 = MessageDigest.getInstance("MD5")
+            java.util.Base64.getEncoder().encodeToString(md5.digest(body.toByteArray(Charsets.UTF_8)))
+        } else ""
 
         val canonicalizedHeaders = ""
 

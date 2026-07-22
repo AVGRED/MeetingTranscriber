@@ -13,37 +13,24 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.mt.config.KvKeys
 import com.example.mt.platform.PlatformKeyValueStore
-
-// ── KV 键名 ──
-private const val KV_TINGWU_ID = "tingwu_access_key_id"
-private const val KV_TINGWU_SECRET = "tingwu_access_key_secret"
-private const val KV_TINGWU_APPKEY = "tingwu_app_key"
-private const val KV_VOLC_ASR_KEY = "volcengine_asr_api_key"
-private const val KV_VOLC_ASR_TOKEN = "volcengine_asr_access_token"
-private const val KV_ARK_KEY = "ark_api_key"
-private const val KV_ARK_ENDPOINT = "ark_endpoint_id"
-private const val KV_DASHSCOPE_KEY = "dashscope_api_key"
-private const val KV_DEEPSEEK_KEY = "deepseek_api_key"
-private const val KV_KIMI_KEY = "kimi_api_key"
-private const val KV_ZHIPU_KEY = "zhipu_api_key"
-private const val KV_SILICONFLOW_KEY = "siliconflow_api_key"
 
 @Composable
 fun ApiConfigScreen(kvStore: PlatformKeyValueStore) {
     // ── 从 KV Store 加载已有密钥 ──
-    var tingwuId by remember { mutableStateOf(kvStore.getString(KV_TINGWU_ID)) }
-    var tingwuSecret by remember { mutableStateOf(kvStore.getString(KV_TINGWU_SECRET)) }
-    var tingwuAppKey by remember { mutableStateOf(kvStore.getString(KV_TINGWU_APPKEY)) }
-    var volcAsrKey by remember { mutableStateOf(kvStore.getString(KV_VOLC_ASR_KEY)) }
-    var volcAsrToken by remember { mutableStateOf(kvStore.getString(KV_VOLC_ASR_TOKEN)) }
-    var arkKey by remember { mutableStateOf(kvStore.getString(KV_ARK_KEY)) }
-    var arkEndpoint by remember { mutableStateOf(kvStore.getString(KV_ARK_ENDPOINT)) }
-    var dashScopeKey by remember { mutableStateOf(kvStore.getString(KV_DASHSCOPE_KEY)) }
-    var deepseekKey by remember { mutableStateOf(kvStore.getString(KV_DEEPSEEK_KEY)) }
-    var kimiKey by remember { mutableStateOf(kvStore.getString(KV_KIMI_KEY)) }
-    var zhipuKey by remember { mutableStateOf(kvStore.getString(KV_ZHIPU_KEY)) }
-    var siliconflowKey by remember { mutableStateOf(kvStore.getString(KV_SILICONFLOW_KEY)) }
+    var tingwuId by remember { mutableStateOf(kvStore.getString(KvKeys.TINGWU_ACCESS_KEY_ID)) }
+    var tingwuSecret by remember { mutableStateOf(kvStore.getString(KvKeys.TINGWU_ACCESS_KEY_SECRET)) }
+    var tingwuAppKey by remember { mutableStateOf(kvStore.getString(KvKeys.TINGWU_APP_KEY)) }
+    var volcAsrKey by remember { mutableStateOf(kvStore.getString(KvKeys.VOLCENGINE_ASR_API_KEY)) }
+    var volcAsrToken by remember { mutableStateOf(kvStore.getString(KvKeys.VOLCENGINE_ASR_ACCESS_TOKEN)) }
+    var arkKey by remember { mutableStateOf(kvStore.getString(KvKeys.ARK_API_KEY)) }
+    var arkEndpoint by remember { mutableStateOf(kvStore.getString(KvKeys.ARK_ENDPOINT_ID)) }
+    var dashScopeKey by remember { mutableStateOf(kvStore.getString(KvKeys.DASHSCOPE_API_KEY)) }
+    var deepseekKey by remember { mutableStateOf(kvStore.getString(KvKeys.DEEPSEEK_API_KEY)) }
+    var kimiKey by remember { mutableStateOf(kvStore.getString(KvKeys.KIMI_API_KEY)) }
+    var zhipuKey by remember { mutableStateOf(kvStore.getString(KvKeys.ZHIPU_API_KEY)) }
+    var siliconflowKey by remember { mutableStateOf(kvStore.getString(KvKeys.SILICONFLOW_API_KEY)) }
 
     var saved by remember { mutableStateOf(false) }
 
@@ -108,18 +95,18 @@ fun ApiConfigScreen(kvStore: PlatformKeyValueStore) {
         // ── 保存按钮 ──
         Button(
             onClick = {
-                kvStore.putString(KV_TINGWU_ID, tingwuId)
-                kvStore.putString(KV_TINGWU_SECRET, tingwuSecret)
-                kvStore.putString(KV_TINGWU_APPKEY, tingwuAppKey)
-                kvStore.putString(KV_VOLC_ASR_KEY, volcAsrKey)
-                kvStore.putString(KV_VOLC_ASR_TOKEN, volcAsrToken)
-                kvStore.putString(KV_ARK_KEY, arkKey)
-                kvStore.putString(KV_ARK_ENDPOINT, arkEndpoint)
-                kvStore.putString(KV_DASHSCOPE_KEY, dashScopeKey)
-                kvStore.putString(KV_DEEPSEEK_KEY, deepseekKey)
-                kvStore.putString(KV_KIMI_KEY, kimiKey)
-                kvStore.putString(KV_ZHIPU_KEY, zhipuKey)
-                kvStore.putString(KV_SILICONFLOW_KEY, siliconflowKey)
+                kvStore.putString(KvKeys.TINGWU_ACCESS_KEY_ID, tingwuId)
+                kvStore.putString(KvKeys.TINGWU_ACCESS_KEY_SECRET, tingwuSecret)
+                kvStore.putString(KvKeys.TINGWU_APP_KEY, tingwuAppKey)
+                kvStore.putString(KvKeys.VOLCENGINE_ASR_API_KEY, volcAsrKey)
+                kvStore.putString(KvKeys.VOLCENGINE_ASR_ACCESS_TOKEN, volcAsrToken)
+                kvStore.putString(KvKeys.ARK_API_KEY, arkKey)
+                kvStore.putString(KvKeys.ARK_ENDPOINT_ID, arkEndpoint)
+                kvStore.putString(KvKeys.DASHSCOPE_API_KEY, dashScopeKey)
+                kvStore.putString(KvKeys.DEEPSEEK_API_KEY, deepseekKey)
+                kvStore.putString(KvKeys.KIMI_API_KEY, kimiKey)
+                kvStore.putString(KvKeys.ZHIPU_API_KEY, zhipuKey)
+                kvStore.putString(KvKeys.SILICONFLOW_API_KEY, siliconflowKey)
                 saved = true
             },
             modifier = Modifier.fillMaxWidth().height(48.dp),

@@ -16,6 +16,7 @@ import com.example.mt.data.model.MeetingInfo
 import com.example.mt.data.repository.MeetingRepository
 import com.example.mt.platform.PlatformDatabase
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -29,11 +30,16 @@ fun HistoryScreen(db: PlatformDatabase) {
     var showArchived by remember { mutableStateOf(false) }
     var selectedMeeting by remember { mutableStateOf<MeetingInfo?>(null) }
 
-    // 加载会议列表
-    LaunchedEffect(showArchived, searchQuery) {
+    // 加载会议列表（搜索查询做 300ms 防抖，避免每次按键都查库）
+    var debouncedQuery by remember { mutableStateOf("") }
+    LaunchedEffect(searchQuery) {
+        delay(300)
+        debouncedQuery = searchQuery
+    }
+    LaunchedEffect(showArchived, debouncedQuery) {
         withContext(Dispatchers.IO) {
-            meetings = if (searchQuery.isNotBlank()) {
-                meetingRepo.search(searchQuery)
+            meetings = if (debouncedQuery.isNotBlank()) {
+                meetingRepo.search(debouncedQuery)
             } else if (showArchived) {
                 meetingRepo.getArchived()
             } else {

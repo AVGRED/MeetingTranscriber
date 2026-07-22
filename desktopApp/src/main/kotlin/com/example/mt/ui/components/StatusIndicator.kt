@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * 状态指示灯：说话中有绿色脉冲动画，暂停中显示黄色。
+ * 仅在说话时运行动画，避免非说话状态下 60fps 无效 GPU 消耗。
  */
 @Composable
 fun StatusIndicator(
@@ -24,17 +25,22 @@ fun StatusIndicator(
     isPaused: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.4f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "pulseScale",
-    )
+    // 仅在说话模式才创建无限循环动画；其它情况直接用静态值 1f
+    val pulseScale: Float = if (isSpeaking) {
+        val transition = rememberInfiniteTransition(label = "pulse")
+        val animated by transition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.4f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(600, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "pulseScale",
+        )
+        animated
+    } else {
+        1f
+    }
 
     val dotColor = when {
         isPaused -> Color(0xFFF9A825)   // 黄色：暂停
@@ -56,7 +62,7 @@ fun StatusIndicator(
         Box(
             modifier = Modifier
                 .size(10.dp)
-                .scale(if (isSpeaking) pulseScale else 1f)
+                .scale(pulseScale)
                 .clip(CircleShape)
                 .background(dotColor),
         )

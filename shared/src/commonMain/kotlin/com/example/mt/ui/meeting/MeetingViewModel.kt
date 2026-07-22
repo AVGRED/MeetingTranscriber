@@ -232,7 +232,7 @@ class MeetingViewModel(
                     lastSentenceId = currentSentenceId,
                     lastSegmentId = currentSegmentId,
                     snapshot = _transcriptSegments.value.joinToString("\n") { seg ->
-                        "${seg.speakerId}|${seg.displaySpeaker}|${seg.text}|${seg.startTimeMs}|${seg.endTimeMs}"
+                        "${seg.speakerId}|${escapeDelimiter(seg.displaySpeaker)}|${escapeDelimiter(seg.text)}|${seg.startTimeMs}|${seg.endTimeMs}"
                     },
                 )
             }
@@ -293,6 +293,7 @@ class MeetingViewModel(
                     "${seg.displaySpeaker} (${seg.formattedTime}): ${seg.text}"
                 }
 
+                var actualLlmEngine: String = "RULE_BASED"
                 val summary = if (engineKeys.hasAnyCloudLlmKey()) {
                     // 云端 LLM
                     _uiState.update { it.copy(summaryProgress = 0.3f) }
@@ -301,14 +302,16 @@ class MeetingViewModel(
                         // LLM 失败 → 降级到规则兜底
                         Napier.w("MeetingViewModel: LLM 纪要失败，降级到规则摘要: ${it.message}")
                         MeetingSummaryGenerator.generate(transcriptText)
+                    }.also { generated ->
+                        if (result.isSuccess) actualLlmEngine = engineKeys.preferredLlmEngine.name
                     }
                 } else {
                     // 直接规则兜底
                     MeetingSummaryGenerator.generate(transcriptText)
                 }
 
-                // 7. 保存纪要
-                meetingRepo.updateSummary(currentMeetingId, summary, engineKeys.preferredLlmEngine.name)
+                // 7. 保存纪要（记录实际使用的引擎）
+                meetingRepo.updateSummary(currentMeetingId, summary, actualLlmEngine)
 
                 _uiState.update { state ->
                     state.copy(
@@ -448,5 +451,19 @@ class MeetingViewModel(
 
     companion object {
         private const val TAG = "MeetingViewModel"
+
+        /**
+         * 对恢复快照中包含的分隔符进行转义。
+         * 先转义反斜杠，再转义竖线，以确保快照行能被正确解析。
+         */
+        internal fun escapeDelimiter(s: String): String =
+            s.replace("\\", "\\\\").replace("|", "\\|")
+
+        /**
+         * 反转义 — 与 [escapeDelimiter] 配对使用。
+         * 注意：必须先还原竖线再还原反斜杠。
+         */
+        internal fun unescapeDelimiter(s: String): String =
+            s.replace("\\|", "|").replace("\\\\", "\\")
     }
 }

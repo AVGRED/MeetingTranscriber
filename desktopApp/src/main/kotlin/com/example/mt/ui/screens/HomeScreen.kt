@@ -27,11 +27,18 @@ fun HomeScreen(
     var totalCount by remember { mutableStateOf(0L) }
     var activeCount by remember { mutableStateOf(0L) }
 
-    LaunchedEffect(Unit) {
+    // 🔁 每次进入首页都重新加载统计数据
+    var refresh by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit, refresh) {
         withContext(Dispatchers.IO) {
             totalCount = meetingRepo.count()
             activeCount = meetingRepo.countActive()
         }
+    }
+
+    // 导航到会议页面后，返回时自动刷新
+    DisposableEffect(Unit) {
+        onDispose { refresh++ }
     }
 
     Column(

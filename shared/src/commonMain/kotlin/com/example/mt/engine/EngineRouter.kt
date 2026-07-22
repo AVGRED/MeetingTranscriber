@@ -161,8 +161,8 @@ class EngineRouter(
 
     private suspend fun ensureInitialized(engine: AsrEngine): Result<Unit> {
         val status = engine.engineStatus.value
-        if (status.state == EngineState.IDLE || status.state == EngineState.ERROR) {
-            Napier.d("正在初始化 ${engine.type.displayName}...")
+        if (status.state == EngineState.IDLE || status.state == EngineState.ERROR || status.state == EngineState.LOADING) {
+            Napier.d("正在初始化 ${engine.type.displayName} (state=${status.state})...")
             return engine.initialize().onFailure { e ->
                 Napier.e("${engine.type.displayName} 初始化失败: ${e.message}")
             }
@@ -172,8 +172,8 @@ class EngineRouter(
 
     private suspend fun ensureInitialized(engine: LlmEngine): Result<Unit> {
         val status = engine.engineStatus.value
-        if (status.state == EngineState.IDLE || status.state == EngineState.ERROR) {
-            Napier.d("正在初始化 ${engine.type.displayName}...")
+        if (status.state == EngineState.IDLE || status.state == EngineState.ERROR || status.state == EngineState.LOADING) {
+            Napier.d("正在初始化 ${engine.type.displayName} (state=${status.state})...")
             return engine.initialize().onFailure { e ->
                 Napier.e("${engine.type.displayName} 初始化失败: ${e.message}")
             }

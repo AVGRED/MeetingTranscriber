@@ -1,5 +1,6 @@
 package com.example.mt.platform
 
+import android.util.Log
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
 import java.nio.ByteBuffer
@@ -10,6 +11,7 @@ import java.nio.ByteOrder
  */
 actual class VoiceprintModelLoader actual constructor() {
 
+    @Volatile
     private var extractor: SpeakerEmbeddingExtractor? = null
 
     actual val isLoaded: Boolean get() = extractor != null
@@ -22,8 +24,13 @@ actual class VoiceprintModelLoader actual constructor() {
                 ctx.assets,
                 SpeakerEmbeddingExtractorConfig(MODEL_ASSET_PATH, 1, false, "cpu")
             )
+            Log.i(TAG, "Voiceprint model loaded from $MODEL_ASSET_PATH")
             true
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "Voiceprint native lib not found: ${e.message}", e)
+            false
         } catch (e: Exception) {
+            Log.e(TAG, "Voiceprint model load failed: ${e.message}", e)
             false
         }
     }
@@ -45,16 +52,18 @@ actual class VoiceprintModelLoader actual constructor() {
                 stream.release()
             }
         } catch (e: Exception) {
+            Log.w(TAG, "extractEmbedding failed: ${e.message}", e)
             null
         }
     }
 
     actual fun release() {
-        try { extractor?.release() } catch (_: Exception) {}
+        try { extractor?.release() } catch (e: Exception) { Log.w(TAG, "release failed", e) }
         extractor = null
     }
 
     companion object {
+        private const val TAG = "VoiceprintModelLoader"
         private const val MODEL_ASSET_PATH = "models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
         private const val SAMPLE_RATE = 16000
     }

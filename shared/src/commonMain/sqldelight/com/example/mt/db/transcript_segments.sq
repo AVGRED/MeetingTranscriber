@@ -24,8 +24,8 @@ insertSegment:
 INSERT INTO transcript_segments (meetingId, speakerId, displaySpeaker, text, startTimeMs, endTimeMs, sentenceId, isInterim, createdAt, topicId)
 VALUES (:meetingId, :speakerId, :displaySpeaker, :text, :startTimeMs, :endTimeMs, :sentenceId, :isInterim, :createdAt, :topicId);
 
--- 批量插入（替换已存在的 interim 段）
-selectLastInsertId:
+-- 取最近插入行的 ID
+lastInsertId:
 SELECT last_insert_rowid();
 
 -- 按会议查询所有段落（按时间升序）

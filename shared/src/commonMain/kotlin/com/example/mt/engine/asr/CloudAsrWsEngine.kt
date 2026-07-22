@@ -234,9 +234,11 @@ abstract class CloudAsrWsEngine(
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 try {
+                    // 尝试 UTF-8 解码——大部分 ASR 服务端返回的都是文本协议，
+                    // 二进制帧一般是 Gzip/压缩 JSON，先尝试解码
                     handleTextMessage(bytes.utf8())
                 } catch (e: Exception) {
-                    Napier.w("$tag: 解析二进制消息失败: ${e.message}")
+                    Napier.w("$tag: 解析二进制消息失败 (${bytes.size} bytes): ${e.message}")
                 }
             }
 

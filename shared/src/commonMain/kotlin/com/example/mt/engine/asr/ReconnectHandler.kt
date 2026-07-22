@@ -14,9 +14,10 @@ import kotlinx.coroutines.*
 class ReconnectHandler(private val tag: String) {
 
     @Volatile private var attempts = 0
+    @Volatile private var cancelled = false
     @Volatile private var scope: CoroutineScope? = null
 
-    val isExhausted: Boolean get() = attempts >= EngineConstants.MAX_RECONNECT_ATTEMPTS
+    val isExhausted: Boolean get() = attempts >= EngineConstants.MAX_RECONNECT_ATTEMPTS || cancelled
 
     fun start(onReconnect: suspend (Int) -> Unit) {
         if (isExhausted) {
@@ -37,10 +38,11 @@ class ReconnectHandler(private val tag: String) {
 
     fun reset() {
         attempts = 0
+        cancelled = false
     }
 
     fun cancel() {
-        attempts = EngineConstants.MAX_RECONNECT_ATTEMPTS
+        cancelled = true
         scope?.cancel()
         scope = null
     }

@@ -98,10 +98,13 @@ class VocabularyApiClient {
         private const val API_BASE = "https://$API_HOST/openapi/tingwu/v2"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
-        private fun rfc1123Date(): String {
-            val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
-            sdf.timeZone = TimeZone.getTimeZone("GMT")
-            return sdf.format(Date())
+        // 线程安全的 SimpleDateFormat 缓存
+        private val dateFormat: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+            SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("GMT")
+            }
         }
+
+        private fun rfc1123Date(): String = dateFormat.get().format(Date())
     }
 }

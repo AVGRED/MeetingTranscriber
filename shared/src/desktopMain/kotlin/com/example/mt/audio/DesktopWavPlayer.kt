@@ -10,10 +10,11 @@ import javax.sound.sampled.SourceDataLine
 
 actual class WavPlayer actual constructor() {
 
+    private val lock = Any()
     private val _isPlaying = AtomicBoolean(false)
     actual val isPlaying: Boolean get() = _isPlaying.get()
 
-    private var sourceLine: SourceDataLine? = null
+    @Volatile private var sourceLine: SourceDataLine? = null
 
     actual fun play(filePath: String): Boolean {
         if (_isPlaying.get()) return false
@@ -53,7 +54,7 @@ actual class WavPlayer actual constructor() {
                 val line = AudioSystem.getSourceDataLine(format) as SourceDataLine
                 line.open(format, 4096)
                 line.start()
-                sourceLine = line
+                synchronized(lock) { sourceLine = line }
 
                 _isPlaying.set(true)
 
@@ -78,8 +79,10 @@ actual class WavPlayer actual constructor() {
                 true
             }
         } catch (e: Exception) {
-            try { sourceLine?.stop(); sourceLine?.close() } catch (_: Exception) {}
-            sourceLine = null
+            synchronized(lock) {
+                try { sourceLine?.stop(); sourceLine?.close() } catch (_: Exception) {}
+                sourceLine = null
+            }
             _isPlaying.set(false)
             false
         }
@@ -87,8 +90,10 @@ actual class WavPlayer actual constructor() {
 
     actual fun stop() {
         _isPlaying.set(false)
-        try { sourceLine?.stop(); sourceLine?.close() } catch (_: Exception) {}
-        sourceLine = null
+        synchronized(lock) {
+            try { sourceLine?.stop(); sourceLine?.close() } catch (_: Exception) {}
+            sourceLine = null
+        }
     }
 }
 

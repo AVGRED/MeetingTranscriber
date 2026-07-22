@@ -6,7 +6,7 @@ import android.content.Context
  * Android Application Context 持有者。
  *
  * 由 Application.onCreate() 注入，供所有 platform actual 实现访问系统服务。
- * 使用 @Volatile + 双重检查确保线程安全初始化。
+ * 使用 @Volatile 确保跨线程可见性（注入发生在主线程 onCreate，后续读取安全）。
  */
 @Volatile
 private var _appContext: Context? = null
