@@ -1,0 +1,94 @@
+-- 会议主表
+CREATE TABLE meetings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    startTime INTEGER NOT NULL,
+    endTime INTEGER,
+    durationSeconds INTEGER NOT NULL DEFAULT 0,
+    speakerCount INTEGER NOT NULL DEFAULT 0,
+    segmentCount INTEGER NOT NULL DEFAULT 0,
+    summary TEXT,
+    isOffline INTEGER NOT NULL DEFAULT 0,
+    audioFilePath TEXT,
+    isArchived INTEGER NOT NULL DEFAULT 0,
+    archivedAt INTEGER,
+    tag TEXT,
+    asrEngineType TEXT,
+    llmEngineType TEXT,
+    dialectUsed TEXT
+);
+
+-- 插入新会议
+insertMeeting:
+INSERT INTO meetings (title, startTime, endTime, durationSeconds, speakerCount, segmentCount, summary,
+    isOffline, audioFilePath, isArchived, archivedAt, tag, asrEngineType, llmEngineType, dialectUsed)
+VALUES (:title, :startTime, :endTime, :durationSeconds, :speakerCount, :segmentCount, :summary,
+    :isOffline, :audioFilePath, :isArchived, :archivedAt, :tag, :asrEngineType, :llmEngineType, :dialectUsed);
+
+-- 取最近一条插入的 id
+lastInsertId:
+SELECT last_insert_rowid();
+
+-- 按时间倒序查询所有会议
+selectAllMeetings:
+SELECT * FROM meetings ORDER BY startTime DESC;
+
+-- 按 ID 查询单条
+selectMeetingById:
+SELECT * FROM meetings WHERE id = ?;
+
+-- 查询正在进行的会议 (endTime IS NULL 且未归档)
+selectActiveMeetings:
+SELECT * FROM meetings WHERE endTime IS NULL AND isArchived = 0 ORDER BY startTime DESC;
+
+-- 查询已归档会议
+selectArchivedMeetings:
+SELECT * FROM meetings WHERE isArchived = 1 ORDER BY archivedAt DESC;
+
+-- 按标签查询
+selectMeetingsByTag:
+SELECT * FROM meetings WHERE tag = ? ORDER BY startTime DESC;
+
+-- 搜索标题
+searchMeetings:
+SELECT * FROM meetings WHERE title LIKE ('%' || ? || '%') ORDER BY startTime DESC;
+
+-- 更新标题
+updateTitle:
+UPDATE meetings SET title = ? WHERE id = ?;
+
+-- 更新纪要
+updateSummary:
+UPDATE meetings SET summary = ?, llmEngineType = ? WHERE id = ?;
+
+-- 结束会议
+finishMeeting:
+UPDATE meetings SET endTime = ?, durationSeconds = ?, speakerCount = ?, segmentCount = ? WHERE id = ?;
+
+-- 归档会议
+archiveMeeting:
+UPDATE meetings SET isArchived = 1, archivedAt = ? WHERE id = ?;
+
+-- 取消归档
+unarchiveMeeting:
+UPDATE meetings SET isArchived = 0, archivedAt = NULL WHERE id = ?;
+
+-- 更新音频路径
+updateAudioPath:
+UPDATE meetings SET audioFilePath = ? WHERE id = ?;
+
+-- 更新方言
+updateDialect:
+UPDATE meetings SET dialectUsed = ? WHERE id = ?;
+
+-- 删除会议
+deleteMeeting:
+DELETE FROM meetings WHERE id = ?;
+
+-- 统计会议总数
+countMeetings:
+SELECT COUNT(*) FROM meetings;
+
+-- 统计进行中的会议数
+countActiveMeetings:
+SELECT COUNT(*) FROM meetings WHERE endTime IS NULL AND isArchived = 0;

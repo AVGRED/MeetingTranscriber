@@ -1,0 +1,77 @@
+[versions]
+kotlin = "2.0.21"
+compose-multiplatform = "1.7.3"
+agp = "8.7.0"
+ksp = "2.0.21-1.0.27"  # 预留，SQLDelight 替代 Room 后暂未使用
+sqldelight = "2.0.2"
+okhttp = "4.12.0"
+coroutines = "1.9.0"
+napier = "2.7.1"
+kotlinx-serialization = "1.7.3"
+kotlinx-datetime = "0.6.1"
+gson = "2.11.0"
+jna = "5.14.0"
+nanohttpd = "2.3.1"
+zxing = "3.5.3"
+org-json = "20240303"
+androidx-security-crypto = "1.1.0"
+sherpa-onnx = "1.12.29"
+androidx-core = "1.13.1"
+
+[libraries]
+# OkHttp
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+okhttp-logging = { module = "com.squareup.okhttp3:logging-interceptor", version.ref = "okhttp" }
+
+# Coroutines
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
+
+# Serialization
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
+
+# Logging (KMP-compatible, replaces android.util.Log)
+napier = { module = "io.github.aakira:napier", version.ref = "napier" }
+
+# SQLDelight
+sqldelight-coroutines = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
+sqldelight-jvm-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
+sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
+
+# JSON
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+
+# JNA (Windows native interop)
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+
+# NanoHTTPD (LAN sharing server)
+nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }
+
+# ZXing (QR code)
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+
+# org.json (JVM — Android 内置，Desktop 需显式依赖)
+org-json = { module = "org.json:json", version.ref = "org-json" }
+
+# Testing
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+
+# Android-only
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "androidx-security-crypto" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
+sherpa-onnx-android = { module = "com.k2fsa.sherpa:onnx-android", version.ref = "sherpa-onnx" }
+
+# sherpa-onnx JVM desktop (成员 B — 声纹识别)
+sherpa-onnx-java = { module = "com.k2fsa.sherpa:sherpa-onnx", version.ref = "sherpa-onnx" }
+
+[plugins]
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }

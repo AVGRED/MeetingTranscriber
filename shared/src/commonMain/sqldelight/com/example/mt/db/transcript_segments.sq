@@ -1,0 +1,65 @@
+-- 转写段落表
+CREATE TABLE transcript_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    meetingId INTEGER NOT NULL,
+    speakerId TEXT NOT NULL,
+    displaySpeaker TEXT NOT NULL,
+    text TEXT NOT NULL,
+    startTimeMs INTEGER NOT NULL,
+    endTimeMs INTEGER NOT NULL,
+    sentenceId INTEGER NOT NULL DEFAULT 0,
+    isInterim INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    topicId INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (meetingId) REFERENCES meetings(id) ON DELETE CASCADE
+);
+
+-- 索引：按会议查询
+CREATE INDEX IF NOT EXISTS idx_segments_meeting ON transcript_segments(meetingId);
+-- 索引：按句子 ID 查询（恢复用）
+CREATE INDEX IF NOT EXISTS idx_segments_sentence ON transcript_segments(meetingId, sentenceId);
+
+-- 插入一条转写段落
+insertSegment:
+INSERT INTO transcript_segments (meetingId, speakerId, displaySpeaker, text, startTimeMs, endTimeMs, sentenceId, isInterim, createdAt, topicId)
+VALUES (:meetingId, :speakerId, :displaySpeaker, :text, :startTimeMs, :endTimeMs, :sentenceId, :isInterim, :createdAt, :topicId);
+
+-- 批量插入（替换已存在的 interim 段）
+selectLastInsertId:
+SELECT last_insert_rowid();
+
+-- 按会议查询所有段落（按时间升序）
+selectSegmentsByMeeting:
+SELECT * FROM transcript_segments WHERE meetingId = ? ORDER BY startTimeMs ASC;
+
+-- 按会议 + 句子 ID 查询（用于恢复）
+selectSegmentBySentence:
+SELECT * FROM transcript_segments WHERE meetingId = ? AND sentenceId = ?;
+
+-- 查询某会议的最大 sentenceId
+selectMaxSentenceId:
+SELECT MAX(sentenceId) FROM transcript_segments WHERE meetingId = ?;
+
+-- 删除某会议的 interim 段（isInterim = 1）
+deleteInterimSegments:
+DELETE FROM transcript_segments WHERE meetingId = ? AND isInterim = 1;
+
+-- 删除某会议所有段落
+deleteSegmentsByMeeting:
+DELETE FROM transcript_segments WHERE meetingId = ?;
+
+-- 统计某会议的段落数
+countSegmentsByMeeting:
+SELECT COUNT(*) FROM transcript_segments WHERE meetingId = ?;
+
+-- 统计某会议的说话人数
+countDistinctSpeakers:
+SELECT COUNT(DISTINCT speakerId) FROM transcript_segments WHERE meetingId = ? AND isInterim = 0;
+
+-- 更新段落的说话人显示名
+updateSpeakerDisplay:
+UPDATE transcript_segments SET displaySpeaker = ? WHERE meetingId = ? AND speakerId = ?;
+
+-- 将某会议的 interim 段标记为 final
+finalizeInterimSegments:
+UPDATE transcript_segments SET isInterim = 0 WHERE meetingId = ? AND isInterim = 1;
