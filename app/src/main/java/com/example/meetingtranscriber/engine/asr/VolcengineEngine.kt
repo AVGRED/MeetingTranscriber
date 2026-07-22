@@ -22,19 +22,17 @@ import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 /**
  * 豆包/火山引擎云端 ASR 引擎。
  *
- * 使用大模型流式 ASR (bigmodel) 协议，通过二进制 WebSocket 帧通信。
- * 密钥来源: [PreferencesManager] (EncryptedSharedPrefs)。
- *
- * 协议帧格式（大端）:
- * ```
- * [version:1][header_size:1][msg_type:1][flags:1][payload_len:4][payload:N]
- * ```
+ * 基于官方 WebSocket 二进制协议（docs/6561/1354869）:
+ * - URL: bigmodel_async（双向流式优化版）
+ * - 新控制台鉴权: X-Api-Key
+ * - 帧头: 4 字节 nibble 位域 + 4 字节 payload size
  */
 class VolcengineEngine(
     private val prefs: PreferencesManager
@@ -46,6 +44,8 @@ class VolcengineEngine(
     @Volatile private var webSocket: WebSocket? = null
     private var connectId: String = ""
     private var sentenceCounter: Long = 0
+    private var audioSeq: Int = 0
+    private val webSocketReady = AtomicBoolean(false)
 
     private val audioBuffer = ConcurrentLinkedQueue<ByteArray>()
     private var appContext: Context? = null
@@ -99,7 +99,9 @@ class VolcengineEngine(
         try {
             connectId = UUID.randomUUID().toString()
             sentenceCounter = 0
+            audioSeq = 0
             _interimText.value = ""
+            webSocketReady.set(false)
             reconnectHandler.reset()
             reconnectConfig = config
 
@@ -118,16 +120,19 @@ class VolcengineEngine(
     override fun processAudio(pcmData: ByteArray) {
         if (_engineStatus.value.state != EngineState.RUNNING) return
 
-        if (webSocket != null) {
-            // WebSocket 已连接 → 直接发送
+        // 仅当 WebSocket 存在且握手完成（onOpen 已触发）后才直接发送
+        // 否则缓冲，等 onOpen → sendFullClientRequest → flushBuffer 统一发送
+        // 避免音频帧在 FullClientRequest 之前到达服务端导致 "no request object before data"
+        if (webSocket != null && webSocketReady.get()) {
             try {
-                val frame = buildFrame(MSG_AUDIO_ONLY, FLAG_RAW, pcmData)
+                val compressed = gzipCompress(pcmData)
+                audioSeq++
+                val frame = buildAudioFrame(compressed, audioSeq, last = false)
                 webSocket?.send(ByteString.of(*frame))
             } catch (e: Exception) {
                 Log.w(TAG, "发送音频帧失败: ${e.message}")
             }
         } else {
-            // 未连接 → 缓冲（先内存，满了落盘）
             if (audioBuffer.size < EngineConstants.MAX_BUFFER_FRAMES) {
                 audioBuffer.offer(pcmData.copyOf())
             } else {
@@ -137,8 +142,14 @@ class VolcengineEngine(
     }
 
     override suspend fun finalize() {
+        webSocketReady.set(false)
         try {
-            sendAudioLastFrame()
+            // 发送空 payload 最后一帧（不压缩，否则空 Gzip 块服务端解压 EOF）
+            val lastFrame = buildClientFrame(MSG_AUDIO_ONLY, FLAG_LAST, SER_NONE, COMP_NONE, ByteArray(0))
+            webSocket?.send(ByteString.of(*lastFrame))
+            Log.i(TAG, "已发送音频结束帧")
+            // 给服务端一点时间返回最终结果
+            delay(1500)
             webSocket?.close(1000, "用户结束会议")
         } catch (_: Exception) {}
         webSocket = null
@@ -150,6 +161,7 @@ class VolcengineEngine(
     }
 
     override suspend fun dispose() {
+        webSocketReady.set(false)
         reconnectHandler.cancel()
         reconnectConfig = null
         try {
@@ -173,33 +185,37 @@ class VolcengineEngine(
     private fun openWebSocket(config: AsrConfig) {
         val languageCode = if (config.language == "cn") "zh-CN" else config.language
         val requestId = UUID.randomUUID().toString()
-        val resourceId = RESOURCE_ID
 
         val request = Request.Builder()
             .url(WS_URL)
             .apply {
+                // 新控制台: X-Api-Key
+                // 旧控制台: X-Api-Access-Key (fallback)
                 val apiKey = prefs.volcengineAsrApiKey
                 val accessToken = prefs.volcengineAsrAccessToken
 
-                if (apiKey.isNotBlank()) {
-                    header("X-Api-Key", apiKey)
-                } else if (accessToken.isNotBlank()) {
-                    header("X-Api-Access-Key", accessToken)
-                }
+                // 新版控制台 App Key
+                header("X-Api-Key", apiKey)
+                // 同时也可能是旧版 App ID
+                header("X-Api-App-Key", apiKey)
+                Log.i(TAG, "鉴权: X-Api-Key + X-Api-App-Key")
             }
-            .header("X-Api-Resource-Id", resourceId)
+            .header("X-Api-Resource-Id", RESOURCE_ID)
             .header("X-Api-Request-Id", requestId)
             .header("X-Api-Connect-Id", connectId)
-            .header("X-Api-Sequence", "-1")
             .build()
 
-        Log.i(TAG, "打开 WebSocket: resource=$resourceId, requestId=$requestId")
+        Log.i(TAG, "打开 WebSocket: resource=$RESOURCE_ID, requestId=$requestId")
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "WebSocket 已连接, status=${response.code}")
+                // 记录服务端返回的 logid 方便排查
+                val logId = response.header("X-Tt-Logid") ?: "N/A"
+                Log.i(TAG, "X-Tt-Logid=$logId")
                 reconnectHandler.reset()
+                webSocketReady.set(true)
                 sendFullClientRequest(languageCode)
                 flushBuffer()
             }
@@ -208,17 +224,12 @@ class VolcengineEngine(
                 try {
                     parseBinaryMessage(bytes.toByteArray())
                 } catch (e: Exception) {
-                    Log.w(TAG, "解析二进制消息失败: ${e.message}")
+                    Log.w(TAG, "解析二进制消息失败: ${e.message}", e)
                 }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 Log.d(TAG, "收到文本消息: ${text.take(200)}")
-                try {
-                    parseResponseJson(JSONObject(text))
-                } catch (e: Exception) {
-                    Log.w(TAG, "解析文本消息失败: ${e.message}")
-                }
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -228,7 +239,7 @@ class VolcengineEngine(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "WebSocket 已关闭: $code $reason")
-                // 非正常关闭时尝试重连
+                webSocketReady.set(false)
                 if (code != 1000 && _engineStatus.value.state == EngineState.RUNNING) {
                     scheduleReconnect()
                 }
@@ -236,6 +247,7 @@ class VolcengineEngine(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket 失败: ${t.message}, response=${response?.code}")
+                webSocketReady.set(false)
                 if (_engineStatus.value.state == EngineState.RUNNING) {
                     scheduleReconnect()
                 } else {
@@ -252,34 +264,82 @@ class VolcengineEngine(
         if (reconnectHandler.isExhausted) {
             Log.e(TAG, "已达最大重连次数，放弃重连")
             audioBuffer.clear()
-            _engineStatus.value = EngineStatus(EngineState.ERROR, "连接失败，已重试 ${EngineConstants.MAX_RECONNECT_ATTEMPTS} 次")
+            _engineStatus.value = EngineStatus(EngineState.ERROR,
+                "连接失败，已重试 ${EngineConstants.MAX_RECONNECT_ATTEMPTS} 次")
             return
         }
 
+        webSocketReady.set(false) // 重连期间禁止直接发送，音频回缓冲
         reconnectHandler.start { attempt ->
-            _engineStatus.value = EngineStatus(EngineState.LOADING, "正在重连 ($attempt/${EngineConstants.MAX_RECONNECT_ATTEMPTS})...")
+            audioSeq = 0
+            _engineStatus.value = EngineStatus(EngineState.LOADING,
+                "正在重连 ($attempt/${EngineConstants.MAX_RECONNECT_ATTEMPTS})...")
             openWebSocket(config)
         }
     }
 
     // ═══════════════════════════════════════════════════════════
-    // 帧构建 / 压缩
+    // 二进制帧构建 — 基于官方 header 格式（4 字节 nibble 位域）
     // ═══════════════════════════════════════════════════════════
 
-    private fun buildFrame(messageType: Byte, flags: Byte, payload: ByteArray): ByteArray {
-        val size = payload.size
-        val frame = ByteArray(HEADER_SIZE + 4 + size)
-        frame[0] = PROTOCOL_VERSION
-        frame[1] = HEADER_SIZE.toByte()
-        frame[2] = messageType
-        frame[3] = flags
-        frame[4] = ((size shr 24) and 0xFF).toByte()
-        frame[5] = ((size shr 16) and 0xFF).toByte()
-        frame[6] = ((size shr 8) and 0xFF).toByte()
-        frame[7] = (size and 0xFF).toByte()
-        System.arraycopy(payload, 0, frame, 8, size)
-        return frame
+    /**
+     * 构建 4 字节帧头。
+     *   Byte 0: [protocol_version:4][header_size:4] = 0x11
+     *   Byte 1: [message_type:4][flags:4]
+     *   Byte 2: [serialization:4][compression:4]
+     *   Byte 3: reserved = 0x00
+     */
+    private fun buildHeader(msgType: Int, flags: Int, serialization: Int, compression: Int): ByteArray {
+        return byteArrayOf(
+            ((PROTOCOL_VERSION shl 4) or HEADER_SIZE).toByte(),   // 0x11
+            ((msgType shl 4) or (flags and 0x0F)).toByte(),
+            ((serialization shl 4) or (compression and 0x0F)).toByte(),
+            0x00.toByte()
+        )
     }
+
+    /** int32 大端 → 4 字节 */
+    private fun int32BE(value: Int): ByteArray {
+        return byteArrayOf(
+            ((value shr 24) and 0xFF).toByte(),
+            ((value shr 16) and 0xFF).toByte(),
+            ((value shr 8) and 0xFF).toByte(),
+            (value and 0xFF).toByte()
+        )
+    }
+
+    /** 从字节数组读取大端 int32 */
+    private fun readInt32BE(data: ByteArray, offset: Int): Int {
+        return ((data[offset].toInt() and 0xFF) shl 24) or
+                ((data[offset + 1].toInt() and 0xFF) shl 16) or
+                ((data[offset + 2].toInt() and 0xFF) shl 8) or
+                (data[offset + 3].toInt() and 0xFF)
+    }
+
+    /**
+     * 构建客户端请求帧: header(4B) + payload_size(4B) + payload
+     * （客户端请求无 sequence 字段，服务端响应才有）
+     */
+    private fun buildClientFrame(
+        msgType: Int, flags: Int, serialization: Int, compression: Int, payload: ByteArray
+    ): ByteArray {
+        val header = buildHeader(msgType, flags, serialization, compression)
+        val sizeBytes = int32BE(payload.size)
+        return header + sizeBytes + payload
+    }
+
+    /**
+     * 构建音频帧: header(4B) + payload_size(4B) + payload
+     * V1 协议中客户端请求不包含 sequence，由服务端自动分配。
+     */
+    private fun buildAudioFrame(compressedAudio: ByteArray, seq: Int, last: Boolean): ByteArray {
+        val flags = if (last) FLAG_LAST else FLAG_NONE
+        return buildClientFrame(MSG_AUDIO_ONLY, flags, SER_NONE, COMP_GZIP, compressedAudio)
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 压缩工具
+    // ═══════════════════════════════════════════════════════════
 
     private fun gzipCompress(data: ByteArray): ByteArray {
         val bos = ByteArrayOutputStream()
@@ -298,10 +358,6 @@ class VolcengineEngine(
     private fun sendFullClientRequest(languageCode: String) {
         try {
             val requestJson = JSONObject().apply {
-                put("app", JSONObject().apply {
-                    put("appid", "")
-                    put("cluster", "")
-                })
                 put("user", JSONObject().apply {
                     put("uid", connectId)
                 })
@@ -315,33 +371,31 @@ class VolcengineEngine(
                 })
                 put("request", JSONObject().apply {
                     put("model_name", "bigmodel")
-                    put("enable_punctuation", true)
+                    put("enable_punc", true)
                     put("enable_itn", true)
+                    put("enable_ddc", true)
                     put("show_utterances", true)
                     put("result_type", "single")
-                    put("request_id", connectId)
+                    // 说话人分离：服务端返回 words[].speaker，按人标注
+                    put("enable_speaker_info", true)
+                    // 二遍识别: 流式实时出字 + 非流式修正，兼顾速度与准确率
+                    put("enable_nonstream", true)
+                    put("end_window_size", 800)
                 })
             }
 
             val jsonBytes = requestJson.toString().toByteArray(Charsets.UTF_8)
             val compressed = gzipCompress(jsonBytes)
-            val frame = buildFrame(MSG_FULL_REQUEST, FLAG_JSON_GZIP, compressed)
+
+            val frame = buildClientFrame(
+                MSG_FULL_REQUEST, FLAG_NONE, SER_JSON, COMP_GZIP, compressed
+            )
 
             webSocket?.send(ByteString.of(*frame))
-            Log.i(TAG, "已发送完整客户端请求")
+            Log.i(TAG, "已发送完整客户端请求 (${jsonBytes.size}B → ${compressed.size}B Gzip)")
         } catch (e: Exception) {
-            Log.e(TAG, "发送初始请求失败: ${e.message}")
+            Log.e(TAG, "发送初始请求失败: ${e.message}", e)
             _engineStatus.value = EngineStatus(EngineState.ERROR, "发送请求失败: ${e.message}")
-        }
-    }
-
-    private fun sendAudioLastFrame() {
-        try {
-            val frame = buildFrame(MSG_AUDIO_LAST, FLAG_RAW, ByteArray(0))
-            webSocket?.send(ByteString.of(*frame))
-            Log.i(TAG, "已发送音频结束帧")
-        } catch (e: Exception) {
-            Log.w(TAG, "发送音频结束帧失败: ${e.message}")
         }
     }
 
@@ -355,7 +409,9 @@ class VolcengineEngine(
         while (audioBuffer.isNotEmpty()) {
             val data = audioBuffer.poll() ?: break
             try {
-                val frame = buildFrame(MSG_AUDIO_ONLY, FLAG_RAW, data)
+                val compressed = gzipCompress(data)
+                audioSeq++
+                val frame = buildAudioFrame(compressed, audioSeq, last = false)
                 webSocket?.send(ByteString.of(*frame))
                 sent++
             } catch (e: Exception) {
@@ -374,7 +430,9 @@ class VolcengineEngine(
                         val chunk = if (read == EngineConstants.AUDIO_FRAME_SIZE) buffer.copyOf()
                         else buffer.copyOfRange(0, read)
                         try {
-                            val frame = buildFrame(MSG_AUDIO_ONLY, FLAG_RAW, chunk)
+                            val compressed = gzipCompress(chunk)
+                            audioSeq++
+                            val frame = buildAudioFrame(compressed, audioSeq, last = false)
                             webSocket?.send(ByteString.of(*frame))
                             sent++
                         } catch (e: Exception) {
@@ -418,169 +476,182 @@ class VolcengineEngine(
     // 响应解析
     // ═══════════════════════════════════════════════════════════
 
+    /**
+     * 解析服务端二进制帧。
+     *
+     * 服务端响应格式: header(4B) + sequence(4B) + payload_size(4B) + payload
+     * 错误帧格式:      header(4B) + error_code(4B) + error_size(4B) + error_msg
+     */
     private fun parseBinaryMessage(data: ByteArray) {
         if (data.size < 8) return
 
-        val msgType = data[2]
-        val flags = data[3]
-        val payloadSize = ((data[4].toInt() and 0xFF) shl 24) or
-                ((data[5].toInt() and 0xFF) shl 16) or
-                ((data[6].toInt() and 0xFF) shl 8) or
-                (data[7].toInt() and 0xFF)
-
-        if (data.size < 8 + payloadSize) return
+        val msgType = (data[1].toInt() shr 4) and 0x0F
+        val flags = data[1].toInt() and 0x0F
+        val serialization = (data[2].toInt() shr 4) and 0x0F
+        val compression = data[2].toInt() and 0x0F
 
         when (msgType) {
             MSG_SERVER_RESPONSE -> {
-                val json = extractJsonPayload(data, 8, payloadSize, flags)
-                if (json != null) parseResponseJson(json)
+                if (data.size < 12) return
+                val sequence = readInt32BE(data, 4)
+                val payloadSize = readInt32BE(data, 8)
+                if (data.size < 12 + payloadSize) return
+                val payload = data.copyOfRange(12, 12 + payloadSize)
+                val decompressed = if (compression == COMP_GZIP) gzipDecompress(payload) else payload
+                val jsonString = String(decompressed, Charsets.UTF_8)
+                Log.d(TAG, "响应 [seq=$sequence, flags=$flags]: ${jsonString.take(300)}")
+                try {
+                    parseResponseJson(JSONObject(jsonString), flags)
+                } catch (e: Exception) {
+                    Log.w(TAG, "解析响应 JSON 失败: ${e.message}")
+                }
             }
             MSG_SERVER_ERROR -> {
-                val json = extractJsonPayload(data, 8, payloadSize, flags)
-                val errorMsg = json?.optString("message",
-                    json?.optString("error", "未知错误") ?: "未知错误")
-                Log.e(TAG, "服务端错误帧: $errorMsg")
+                if (data.size < 12) return
+                val errorCode = readInt32BE(data, 4)
+                val errorSize = readInt32BE(data, 8)
+                if (data.size < 12 + errorSize) return
+                val errorMsg = String(data.copyOfRange(12, 12 + errorSize), Charsets.UTF_8)
+                Log.e(TAG, "服务端错误 [$errorCode]: $errorMsg")
                 _engineStatus.value = EngineStatus(EngineState.ERROR, "服务端错误: $errorMsg")
             }
             else -> {
-                // 尝试作为文本解析
-                try {
-                    val raw = String(data.copyOfRange(8, 8 + payloadSize), Charsets.UTF_8)
-                    if (raw.trimStart().startsWith("{")) {
-                        parseResponseJson(JSONObject(raw))
-                    }
-                } catch (_: Exception) {}
+                Log.w(TAG, "未知消息类型: $msgType")
             }
         }
     }
 
-    private fun extractJsonPayload(data: ByteArray, offset: Int, size: Int, flags: Byte): JSONObject? {
-        return try {
-            val raw = data.copyOfRange(offset, offset + size)
-            val isGzip = (flags.toInt() and FLAG_GZIP_MASK.toInt()) != 0
-            val jsonBytes = if (isGzip) gzipDecompress(raw) else raw
-            JSONObject(String(jsonBytes, Charsets.UTF_8))
-        } catch (e: Exception) {
-            null
-        }
-    }
+    /**
+     * 解析识别结果 JSON。
+     *
+     * 官方格式:
+     * ```
+     * {
+     *   "audio_info": {"duration": 10000},
+     *   "result": {
+     *     "text": "全文累计识别文本",
+     *     "utterances": [
+     *       {"text": "分句文本", "definite": true, "start_time": 0, "end_time": 1705, "words": [...]},
+     *       ...
+     *     ]
+     *   }
+     * }
+     * ```
+     */
+    private fun parseResponseJson(json: JSONObject, flags: Int) {
+        // 优先解析 audio_info（可能独立出现）
+        val audioInfo = json.optJSONObject("audio_info")
 
-    private fun parseResponseJson(json: JSONObject) {
-        Log.d(TAG, "响应 JSON: ${json.toString().take(400)}")
-
-        val payload = json.optJSONObject("payload_msg")
-            ?: json.optJSONObject("payload")
-
-        if (payload != null) {
-            val code = payload.optInt("code", -1)
-            if (code != 0 && code != -1) {
-                _engineStatus.value = EngineStatus(
-                    EngineState.ERROR,
-                    "code=$code: ${payload.optString("message", "未知错误")}"
-                )
-                return
+        val result = json.optJSONObject("result") ?: run {
+            // 有些响应只含 audio_info，不视为错误
+            if (audioInfo != null) {
+                Log.d(TAG, "仅含 audio_info: duration=${audioInfo.optInt("duration")}")
             }
-
-            val results = payload.optJSONArray("result")
-            if (results != null && results.length() > 0) {
-                processResults(results)
-                return
-            }
-        }
-
-        val topResults = json.optJSONArray("result")
-        if (topResults != null && topResults.length() > 0) {
-            processResults(topResults)
             return
         }
 
-        val topText = json.optString("text", "")
-        if (topText.isNotBlank()) {
-            _interimText.value = topText.trim()
+        val utterances = result.optJSONArray("utterances")
+        val fullText = result.optString("text", "")
+
+        if (utterances != null && utterances.length() > 0) {
+            // 逐 utterance 处理
+            for (i in 0 until utterances.length()) {
+                val utt = utterances.optJSONObject(i) ?: continue
+                val uttText = utt.optString("text", "")
+                val definite = utt.optBoolean("definite", false)
+                val startMs = utt.optLong("start_time", 0L)
+                val endMs = utt.optLong("end_time", 0L)
+
+                if (uttText.isBlank()) continue
+
+                if (definite) {
+                    // definite=true → 一个完整分句（VAD 判停或 end_window_size 触发）
+                    sentenceCounter++
+                    _sentenceResults.tryEmit(
+                        AsrSentence(
+                            text = uttText.trim(),
+                            sentenceId = sentenceCounter,
+                            speakerId = extractSpeakerId(utt),
+                            startTimeMs = startMs,
+                            endTimeMs = endMs,
+                            isFinal = true
+                        )
+                    )
+                    Log.d(TAG, "分句: \"${uttText.trim().take(30)}...\"")
+                } else {
+                    // 非 definite → 中间结果
+                    _interimText.value = uttText.trim()
+                }
+            }
         }
-    }
 
-    private fun processResults(results: JSONArray) {
-        for (i in 0 until results.length()) {
-            val result = results.optJSONObject(i) ?: continue
-            val text = result.optString("text", "")
-            val isFinal = result.optBoolean("is_final", false)
-            val utterances = result.optJSONArray("utterances")
-
-            if (isFinal && text.isNotBlank()) {
+        // 全文也更新 interim（definite 的 utterance 已经 emit，这里做兜底）
+        if (fullText.isNotBlank() && (utterances == null || utterances.length() == 0)) {
+            val isServerFinal = (flags and FLAG_SERVER_FINAL) != 0
+            if (isServerFinal) {
                 sentenceCounter++
-                val (speakerId, startMs, endMs) = extractUtteranceMeta(utterances)
                 _sentenceResults.tryEmit(
                     AsrSentence(
-                        text = text.trim(),
+                        text = fullText.trim(),
                         sentenceId = sentenceCounter,
-                        speakerId = speakerId,
-                        startTimeMs = startMs,
-                        endTimeMs = endMs,
+                        speakerId = "0",
+                        startTimeMs = 0L,
+                        endTimeMs = audioInfo?.optLong("duration", 0L) ?: 0L,
                         isFinal = true
                     )
                 )
-            } else if (text.isNotBlank()) {
-                _interimText.value = text.trim()
-            } else if (utterances != null && utterances.length() > 0) {
-                val first = utterances.optJSONObject(0)
-                val uttText = first?.optString("text", "") ?: ""
-                if (uttText.isNotBlank()) {
-                    if (isFinal) {
-                        sentenceCounter++
-                        val (sid, sMs, eMs) = extractUtteranceMeta(utterances)
-                        _sentenceResults.tryEmit(
-                            AsrSentence(
-                                text = uttText.trim(),
-                                sentenceId = sentenceCounter,
-                                speakerId = sid,
-                                startTimeMs = sMs,
-                                endTimeMs = eMs,
-                                isFinal = true
-                            )
-                        )
-                    } else {
-                        _interimText.value = uttText.trim()
-                    }
-                }
+            } else {
+                _interimText.value = fullText.trim()
             }
         }
     }
 
-    private fun extractUtteranceMeta(utterances: JSONArray?): Triple<String, Long, Long> {
-        if (utterances == null || utterances.length() == 0) return Triple("0", 0L, 0L)
-        val first = utterances.optJSONObject(0) ?: return Triple("0", 0L, 0L)
-        return Triple(
-            first.optString("speaker", "0"),
-            first.optLong("start_time", 0L),
-            first.optLong("end_time", 0L)
-        )
+    /** 从 utterance 的 words 中提取说话人信息（如果 speaker_info 未开启则返回 "0"） */
+    private fun extractSpeakerId(utt: JSONObject): String {
+        val words = utt.optJSONArray("words") ?: return "0"
+        // 开启 enable_speaker_info 后，words 中可能有 speaker 字段
+        for (i in 0 until words.length()) {
+            val w = words.optJSONObject(i) ?: continue
+            val sid = w.optString("speaker", "")
+            if (sid.isNotBlank()) return sid
+        }
+        return "0"
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // 常量
+    // ═══════════════════════════════════════════════════════════
 
     companion object {
         private const val TAG = "VolcengineEngine"
 
-        // WebSocket
-        private const val WS_URL = "wss://openspeech.bytedance.com/api/v3/plan/sauc/bigmodel_async"
+        // ── 端点 ──
+        /** 双向流式优化版（推荐）: 仅结果变化时返回，RTF 和延迟最优 */
+        private const val WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
         private const val RESOURCE_ID = "volc.seedasr.sauc.duration"
 
-        // 缓冲
-        // 共享常量已迁移至 EngineConstants
+        // ── Header 位域 ──
+        private const val PROTOCOL_VERSION = 1       // 0b0001
+        private const val HEADER_SIZE = 1            // 0b0001 → 1×4 = 4 bytes
 
-        // 二进制帧
-        private const val MSG_FULL_REQUEST: Byte = 0x11.toByte()
-        private const val MSG_AUDIO_ONLY: Byte = 0x12.toByte()
-        private const val MSG_AUDIO_LAST: Byte = 0x13.toByte()
-        private const val MSG_SERVER_RESPONSE: Byte = 0x91.toByte()
-        private const val MSG_SERVER_ERROR: Byte = 0x92.toByte()
+        // ── 消息类型 (4 bits, Byte 1 高半字节) ──
+        private const val MSG_FULL_REQUEST = 0x1     // 完整客户端请求
+        private const val MSG_AUDIO_ONLY = 0x2       // 音频帧
+        private const val MSG_SERVER_RESPONSE = 0x9  // 服务端识别结果
+        private const val MSG_SERVER_ERROR = 0xF     // 服务端错误
 
-        private const val FLAG_JSON_GZIP: Byte = 0x30.toByte()
-        private const val FLAG_RAW: Byte = 0x00
-        private const val FLAG_GZIP_MASK: Byte = 0x20.toByte()
+        // ── 标志位 (4 bits, Byte 1 低半字节) ──
+        private const val FLAG_NONE = 0x0            // 无特殊含义
+        private const val FLAG_POS_SEQ = 0x1         // 后跟正数 sequence
+        private const val FLAG_LAST = 0x2            // 最后一包（无 sequence）
+        private const val FLAG_SERVER_FINAL = 0x3    // 服务端最终结果
 
-        private const val HEADER_SIZE = 4
-        private const val PROTOCOL_VERSION: Byte = 0x01
+        // ── 序列化方式 (4 bits, Byte 2 高半字节) ──
+        private const val SER_NONE = 0x0             // 无序列化（原始字节）
+        private const val SER_JSON = 0x1             // JSON
 
-        /** WebSocket 重连配置 — 已迁移至 EngineConstants */
+        // ── 压缩方式 (4 bits, Byte 2 低半字节) ──
+        private const val COMP_NONE = 0x0            // 不压缩
+        private const val COMP_GZIP = 0x1            // Gzip
     }
 }

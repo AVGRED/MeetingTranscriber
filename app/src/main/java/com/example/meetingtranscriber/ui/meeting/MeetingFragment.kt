@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
 
 class MeetingFragment : Fragment() {
 
-    private enum class StartMode { ONLINE, OFFLINE }
+    private enum class StartMode { ONLINE }
 
     private var _binding: FragmentMeetingBinding? = null
     private val binding get() = _binding!!
@@ -40,6 +40,15 @@ class MeetingFragment : Fragment() {
     private val viewModel: MeetingViewModel by viewModels()
     private lateinit var adapter: TranscriptAdapter
     private var pendingStartMode: StartMode = StartMode.ONLINE
+
+    /** 上次 render 的 UI 状态：跳过无变化的 View set 操作，每帧省 15+ 次 view 属性写入 */
+    private var lastState: MeetingUiState? = null
+
+    /** 颜色缓存：ContextCompat.getColor() 含资源表 + 主题解析，isSpeaking 每 200ms
+     *  翻转时白跑查找——跟 adapter 里一样的原理，电视固定亮色模式无需考虑 invalidate */
+    private val colorCache = mutableMapOf<Int, Int>()
+    private fun cachedColor(resId: Int): Int =
+        colorCache.getOrPut(resId) { ContextCompat.getColor(requireContext(), resId) }
 
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -90,6 +99,14 @@ class MeetingFragment : Fragment() {
         binding.rvTranscript.layoutManager = LinearLayoutManager(requireContext()).apply {
             stackFromEnd = true
         }
+        // Fix B1: RV 高度由 ConstraintLayout 约束 (0dp)，内容变化不影响尺寸，
+        // 设置后跳过每次 notify 的 measure pass
+        binding.rvTranscript.setHasFixedSize(true)
+        // Fix B2: item 简单（3 个 TextView），多缓存 6 个减少 inflate/bind 抖动
+        binding.rvTranscript.setItemViewCacheSize(8)
+        // Fix B3: 4K 软渲染设备上 300ms 插入/删除动画每帧全屏 draw，
+        // 直播转写每分钟数十次 notify 动画叠加，关闭动画大幅减少 draw 开销
+        binding.rvTranscript.itemAnimator = null
     }
 
     private fun setupClickListeners() {
@@ -98,7 +115,6 @@ class MeetingFragment : Fragment() {
         )
 
         binding.btnOnline.setOnClickListener { startOnlineMeeting() }
-        binding.btnOffline.setOnClickListener { startOfflineMeeting() }
 
         binding.btnStartEnd.setOnClickListener {
             if (viewModel.uiState.value.isMeetingActive) {
@@ -114,7 +130,6 @@ class MeetingFragment : Fragment() {
     }
 
     fun startOnlineMeeting() { requestPermissionsAndStart(StartMode.ONLINE) }
-    fun startOfflineMeeting() { requestPermissionsAndStart(StartMode.OFFLINE) }
 
     fun recoverFromCrash(state: RecoveryStateEntity) {
         viewModel.recoverFromCrash(state)
@@ -158,10 +173,6 @@ class MeetingFragment : Fragment() {
         val language = getSelectedLanguage()
         when (mode) {
             StartMode.ONLINE -> viewModel.startMeeting(title, language)
-            StartMode.OFFLINE -> viewModel.startMeeting(
-                title, language,
-                engineTypeOverride = com.example.meetingtranscriber.engine.AsrEngineType.FUNASR_LOCAL
-            )
         }
     }
 
@@ -177,10 +188,12 @@ class MeetingFragment : Fragment() {
                 launch {
                     viewModel.segments.collectLatest { segments ->
                         adapter.submitSegments(segments, isLive = true) {
-                            // 仅当已停在底部时跳到最新（无动画）：不打断往回翻看，
-                            // 也避免每句 final 都触发平滑滚动动画
-                            if (segments.isNotEmpty() && !binding.rvTranscript.canScrollVertically(1)) {
-                                binding.rvTranscript.scrollToPosition(adapter.itemCount - 1)
+                            // post 延迟到 RV 已完成 layout 后再读 scroll state，
+                            // 避免在 RV 仍 dirty 时同步触发额外 layout pass
+                            binding.rvTranscript.post {
+                                if (segments.isNotEmpty() && !binding.rvTranscript.canScrollVertically(1)) {
+                                    binding.rvTranscript.scrollToPosition(adapter.itemCount - 1)
+                                }
                             }
                         }
                     }
@@ -190,7 +203,9 @@ class MeetingFragment : Fragment() {
                 // 任何一路发射不再全量刷 20+ 个 view（低端机持续掉帧源之一）
                 launch {
                     viewModel.uiState.map { it.interimText }.distinctUntilChanged().collect { text ->
-                        adapter.setInterimText(text.takeIf { it.isNotBlank() })
+                        val hasText = text.isNotBlank()
+                        binding.tvInterim.visibility = if (hasText) View.VISIBLE else View.GONE
+                        if (hasText) binding.tvInterim.text = text
                     }
                 }
                 launch {
@@ -222,100 +237,119 @@ class MeetingFragment : Fragment() {
     }
 
     private fun updateUI(state: MeetingUiState) {
-        if (state.asrEngineName.isNotBlank()) {
-            binding.tvEngineLabel.text = "当前引擎：${state.asrEngineName}"
-            binding.tvEngineLabel.visibility = View.VISIBLE
-        } else {
-            binding.tvEngineLabel.visibility = View.GONE
+        val prev = lastState
+        lastState = state
+
+        // ── 引擎标签（仅在引擎切换时变） ──
+        if (prev == null || prev.asrEngineName != state.asrEngineName) {
+            if (state.asrEngineName.isNotBlank()) {
+                binding.tvEngineLabel.text = "当前引擎：${state.asrEngineName}"
+                binding.tvEngineLabel.visibility = View.VISIBLE
+            } else {
+                binding.tvEngineLabel.visibility = View.GONE
+            }
         }
 
-        if (state.isGeneratingSummary) {
-            binding.progressSummary.visibility = View.VISIBLE
-            binding.progressSummary.progress = (state.summaryProgress * 100).toInt()
-        } else {
-            binding.progressSummary.visibility = View.GONE
+        // ── 摘要进度条（仅在 LLM 生成时变） ──
+        if (prev == null || prev.isGeneratingSummary != state.isGeneratingSummary ||
+            prev.summaryProgress != state.summaryProgress) {
+            if (state.isGeneratingSummary) {
+                binding.progressSummary.visibility = View.VISIBLE
+                binding.progressSummary.progress = (state.summaryProgress * 100).toInt()
+            } else {
+                binding.progressSummary.visibility = View.GONE
+            }
         }
 
-        when (state.connectionState) {
-            ConnectionState.CONNECTING -> {
-                // 本地引擎首次加载模型需 3-4s：给出加载反馈，不再无提示假死
-                binding.layoutConnectionBanner.visibility = View.VISIBLE
-                binding.layoutConnectionBanner.setBackgroundColor(
-                    ContextCompat.getColor(requireContext(), R.color.status_paused)
-                )
-                binding.tvConnectionStatus.text = "正在启动语音引擎…"
-                binding.btnRetry.visibility = View.GONE
+        // ── 连接状态条（仅 connect/disconnect/fail 时变） ──
+        if (prev == null || prev.connectionState != state.connectionState ||
+            prev.errorMessage != state.errorMessage) {
+            when (state.connectionState) {
+                ConnectionState.CONNECTING -> {
+                    binding.layoutConnectionBanner.visibility = View.VISIBLE
+                    binding.layoutConnectionBanner.setBackgroundColor(
+                        cachedColor(R.color.status_paused))
+                    binding.tvConnectionStatus.text = "正在启动语音引擎…"
+                    binding.btnRetry.visibility = View.GONE
+                }
+                ConnectionState.RECONNECTING -> {
+                    binding.layoutConnectionBanner.visibility = View.VISIBLE
+                    binding.layoutConnectionBanner.setBackgroundColor(
+                        cachedColor(R.color.status_paused))
+                    binding.tvConnectionStatus.text = "网络中断，正在重连..."
+                    binding.btnRetry.visibility = View.GONE
+                }
+                ConnectionState.FAILED -> {
+                    binding.layoutConnectionBanner.visibility = View.VISIBLE
+                    binding.layoutConnectionBanner.setBackgroundColor(
+                        cachedColor(R.color.error_red))
+                    binding.tvConnectionStatus.text =
+                        state.errorMessage ?: "连接失败，请检查网络后重试"
+                    binding.btnRetry.visibility = View.VISIBLE
+                }
+                else -> { binding.layoutConnectionBanner.visibility = View.GONE }
             }
-            ConnectionState.RECONNECTING -> {
-                binding.layoutConnectionBanner.visibility = View.VISIBLE
-                binding.layoutConnectionBanner.setBackgroundColor(
-                    ContextCompat.getColor(requireContext(), R.color.status_paused)
-                )
-                binding.tvConnectionStatus.text = "网络中断，正在重连..."
-                binding.btnRetry.visibility = View.GONE
-            }
-            ConnectionState.FAILED -> {
-                binding.layoutConnectionBanner.visibility = View.VISIBLE
-                binding.layoutConnectionBanner.setBackgroundColor(
-                    ContextCompat.getColor(requireContext(), R.color.error_red)
-                )
-                // 优先显示引擎真实错误（本地模型加载失败时"检查网络"是误导）
-                binding.tvConnectionStatus.text =
-                    state.errorMessage ?: "连接失败，请检查网络后重试"
-                binding.btnRetry.visibility = View.VISIBLE
-            }
-            else -> { binding.layoutConnectionBanner.visibility = View.GONE }
         }
 
-        if (state.isMeetingActive) {
-            binding.layoutTitleInput.visibility = View.GONE
-            binding.btnStartEnd.text = "结束会议"
-            binding.btnStartEnd.isEnabled = true
-            binding.btnStartEnd.setBackgroundColor(
-                ContextCompat.getColor(requireContext(), R.color.error_red)
-            )
-            binding.btnOnline.visibility = View.GONE
-            binding.btnOffline.visibility = View.GONE
-            binding.btnPause.visibility = View.VISIBLE
-            binding.btnPause.text = if (state.isPaused) "继续" else "暂停"
+        // ── 会议开启/结束 → 全量刷一次（稀有事件；首次也走） ──
+        // ── 会议进行中 → 只刷状态灯（isSpeaking / isPaused）──
+        if (prev == null || prev.isMeetingActive != state.isMeetingActive) {
+            // 会议状态切换：全量刷
+            if (state.isMeetingActive) {
+                binding.layoutTitleInput.visibility = View.GONE
+                binding.btnStartEnd.text = "结束会议"
+                binding.btnStartEnd.isEnabled = true
+                binding.btnStartEnd.setBackgroundColor(
+                    cachedColor(R.color.error_red))
+                binding.btnOnline.visibility = View.GONE
+                binding.btnOffline.visibility = View.GONE
+                binding.btnPause.visibility = View.VISIBLE
+                binding.btnPause.text = if (state.isPaused) "继续" else "暂停"
+            } else {
+                binding.layoutTitleInput.visibility = View.VISIBLE
+                binding.btnStartEnd.text = "开始会议"
+                binding.btnStartEnd.isEnabled = true
+                binding.btnStartEnd.setBackgroundColor(
+                    cachedColor(R.color.primary))
+                binding.btnOnline.visibility = View.VISIBLE
+                binding.btnOffline.visibility = View.VISIBLE
+                binding.btnPause.visibility = View.GONE
+                binding.tvTimer.text = "00:00:00"
+            }
+        } else if (state.isMeetingActive) {
+            // 已激活，只看暂停/说话状态
+            if (prev.isPaused != state.isPaused) {
+                binding.btnPause.text = if (state.isPaused) "继续" else "暂停"
+            }
+        }
 
-            // 计时器由 observeState 的专属收集器更新，此处不再处理
-
+        // ── 状态灯（isSpeaking 每 ~200ms 翻转，只做 tint） ──
+        if (state.isMeetingActive && (prev == null || prev.isSpeaking != state.isSpeaking ||
+                prev.isPaused != state.isPaused || prev.isConnected != state.isConnected)) {
             binding.ivStatus.background?.setTint(
-                ContextCompat.getColor(
-                    requireContext(),
+                cachedColor(
                     when {
                         state.isPaused -> R.color.status_paused
                         state.isSpeaking -> R.color.status_recording
                         state.isConnected -> R.color.status_connected_silent
                         else -> R.color.interim_text
-                    }
-                )
-            )
-        } else {
-            binding.layoutTitleInput.visibility = View.VISIBLE
-            binding.btnStartEnd.text = "开始会议"
-            binding.btnStartEnd.isEnabled = true
-            binding.btnStartEnd.setBackgroundColor(
-                ContextCompat.getColor(requireContext(), R.color.primary)
-            )
-            binding.btnOnline.visibility = View.VISIBLE
-            binding.btnOffline.visibility = View.VISIBLE
-            binding.btnPause.visibility = View.GONE
-            binding.tvTimer.text = "00:00:00"
+                    }))
+        } else if (!state.isMeetingActive && (prev == null || prev.isMeetingActive)) {
             binding.ivStatus.background?.setTint(
-                ContextCompat.getColor(requireContext(), R.color.interim_text)
-            )
+                cachedColor(R.color.interim_text))
         }
 
-        if (state.errorMessage != null) {
-            binding.tvError.visibility = View.VISIBLE
-            binding.tvError.text = state.errorMessage
-            binding.tvError.setOnClickListener { viewModel.clearError() }
-        } else {
-            binding.tvError.visibility = View.GONE
-            binding.tvError.text = ""
-            binding.tvError.setOnClickListener(null)
+        // ── 错误条（仅在 errorMessage 变化时刷新） ──
+        if (prev == null || prev.errorMessage != state.errorMessage) {
+            if (state.errorMessage != null) {
+                binding.tvError.visibility = View.VISIBLE
+                binding.tvError.text = state.errorMessage
+                binding.tvError.setOnClickListener { viewModel.clearError() }
+            } else {
+                binding.tvError.visibility = View.GONE
+                binding.tvError.text = ""
+                binding.tvError.setOnClickListener(null)
+            }
         }
     }
 

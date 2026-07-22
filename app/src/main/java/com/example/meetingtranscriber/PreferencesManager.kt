@@ -74,14 +74,18 @@ class PreferencesManager(context: Context) {
         get() = securePrefs.getString(KEY_DASHSCOPE_API_KEY, "") ?: ""
         set(value) = securePrefs.edit().putString(KEY_DASHSCOPE_API_KEY, value).apply()
 
-    /** 豆包 ASR API Key */
+    /** 豆包 ASR API Key（用户未填时 fallback 到 BuildConfig 预置值） */
     var volcengineAsrApiKey: String
-        get() = securePrefs.getString(KEY_VOLC_ASR_API_KEY, "") ?: ""
+        get() = securePrefs.getString(KEY_VOLC_ASR_API_KEY, "")?.ifBlank {
+            BuildConfig.VOLCENGINE_ASR_API_KEY
+        } ?: ""
         set(value) = securePrefs.edit().putString(KEY_VOLC_ASR_API_KEY, value).apply()
 
-    /** 豆包 ASR Access Token */
+    /** 豆包 ASR Access Token（用户未填时 fallback 到 BuildConfig 预置值） */
     var volcengineAsrAccessToken: String
-        get() = securePrefs.getString(KEY_VOLC_ASR_TOKEN, "") ?: ""
+        get() = securePrefs.getString(KEY_VOLC_ASR_TOKEN, "")?.ifBlank {
+            BuildConfig.VOLCENGINE_ASR_ACCESS_TOKEN
+        } ?: ""
         set(value) = securePrefs.edit().putString(KEY_VOLC_ASR_TOKEN, value).apply()
 
     // ═══════════════════════════════════════════════════════
@@ -125,9 +129,9 @@ class PreferencesManager(context: Context) {
     /** 首选 ASR 引擎（默认云端，无网络自动降级 sherpa-onnx 本地） */
     var preferredAsrEngine: AsrEngineType
         get() {
-            val name = plainPrefs.getString(KEY_ASR_ENGINE, AsrEngineType.FUNASR_CLOUD.name)
-                ?: AsrEngineType.FUNASR_CLOUD.name
-            return try { AsrEngineType.valueOf(name) } catch (_: Exception) { AsrEngineType.FUNASR_CLOUD }
+            val name = plainPrefs.getString(KEY_ASR_ENGINE, AsrEngineType.VOLCENGINE_CLOUD.name)
+                ?: AsrEngineType.VOLCENGINE_CLOUD.name
+            return try { AsrEngineType.valueOf(name) } catch (_: Exception) { AsrEngineType.VOLCENGINE_CLOUD }
         }
         set(value) = plainPrefs.edit().putString(KEY_ASR_ENGINE, value.name).apply()
 
@@ -159,13 +163,6 @@ class PreferencesManager(context: Context) {
         get() = plainPrefs.getBoolean(KEY_BACKGROUND_SILENT, false)
         set(value) = plainPrefs.edit().putBoolean(KEY_BACKGROUND_SILENT, value).apply()
 
-    /** FunASR 云端服务器地址 (ws://host:port/)，用户未填时 fallback 到 BuildConfig 预置值 */
-    var funasrCloudUrl: String
-        get() = plainPrefs.getString(KEY_FUNASR_CLOUD_URL, "")?.ifBlank {
-            BuildConfig.FUNASR_CLOUD_URL
-        } ?: ""
-        set(value) = plainPrefs.edit().putString(KEY_FUNASR_CLOUD_URL, value).apply()
-
     // ═══════════════════════════════════════════════════════
     // 批量查询
     // ═══════════════════════════════════════════════════════
@@ -191,14 +188,11 @@ class PreferencesManager(context: Context) {
     fun hasDashScopeKey(): Boolean = dashScopeApiKey.isNotBlank()
 
     /** 是否有任何云端 ASR Key */
-    fun hasAnyCloudAsrKey(): Boolean = hasFunAsrCloudUrl() || hasTingwuKeys() || hasVolcengineKeys()
+    fun hasAnyCloudAsrKey(): Boolean = hasTingwuKeys() || hasVolcengineKeys()
 
     /** 是否有任何云端 LLM Key */
     fun hasAnyCloudLlmKey(): Boolean = hasArkKey() || hasDashScopeKey() ||
         LlmEngineType.entries.any { it.isCloud && hasLlmKey(it) }
-
-    /** FunASR 云端地址是否已配置 */
-    fun hasFunAsrCloudUrl(): Boolean = funasrCloudUrl.isNotBlank()
 
     companion object {
         private const val TAG = "PreferencesManager"
@@ -250,7 +244,6 @@ class PreferencesManager(context: Context) {
         private const val KEY_AUTO_FALLBACK = "auto_fallback"
         private const val KEY_SUMMARY_STYLE = "summary_style"
         private const val KEY_BACKGROUND_SILENT = "background_silent"
-        private const val KEY_FUNASR_CLOUD_URL = "funasr_cloud_url"
         private const val KEY_LLM_MODEL_PREFIX = "llm_model_"
     }
 }

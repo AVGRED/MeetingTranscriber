@@ -13,12 +13,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Android 音频采集管理器
- *
- * 使用 AudioRecord 采集 16kHz/16bit/单声道 PCM 音频
- * 每 100ms 输出一个音频帧，通过 SharedFlow 发送给下游
- */
 class AudioCaptureManager {
 
     companion object {
@@ -27,14 +21,18 @@ class AudioCaptureManager {
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         const val CHUNK_MS = 100
         const val CHUNK_SIZE = SAMPLE_RATE * 2 * CHUNK_MS / 1000  // 3200 bytes
+
+        // 回落格式：TV USB 麦克风通常只支持 48kHz 立体声
+        const val FALLBACK_SAMPLE_RATE = 48000
+        const val FALLBACK_CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_STEREO
+        const val FALLBACK_CHUNK_SIZE = FALLBACK_SAMPLE_RATE * 2 * 2 * CHUNK_MS / 1000  // 19200 bytes
     }
 
     private var audioRecord: AudioRecord? = null
     private val isCapturing = AtomicBoolean(false)
     private var captureJob: Job? = null
+    private var needsResampling: Boolean = false
 
-    /** 音频数据流，每秒 10 帧。缓冲 64 帧(6.4s)：下游偶发阻塞（decode/IO 抖动）
-     *  时不丢帧——丢帧不只断转写，连录音存档都会缺失 */
     private val _audioStream = MutableSharedFlow<ByteArray>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -44,63 +42,95 @@ class AudioCaptureManager {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    /** 是否有录音权限 */
     fun hasPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             MeetingApplication.instance, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    /** 开始采集 */
     fun start(): Boolean {
         if (isCapturing.get()) return true
         if (!hasPermission()) return false
 
-        val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
-        val bufferSize = maxOf(minBuf, CHUNK_SIZE * 4)
+        needsResampling = false
 
-        audioRecord = try {
-            AudioRecord.Builder()
-                .setAudioSource(MediaRecorder.AudioSource.MIC)
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AUDIO_FORMAT)
-                        .setSampleRate(SAMPLE_RATE)
-                        .setChannelMask(CHANNEL_CONFIG)
-                        .build()
-                )
-                .setBufferSizeInBytes(bufferSize)
-                .build()
-        } catch (e: Exception) {
-            return false
+        // 按优先级尝试 (sampleRate, channelConfig, chunkSize, needsResample)
+        val attempts = listOf(
+            listOf(SAMPLE_RATE, CHANNEL_CONFIG, CHUNK_SIZE, false),                     // 16kHz mono
+            listOf(FALLBACK_SAMPLE_RATE, FALLBACK_CHANNEL_CONFIG, FALLBACK_CHUNK_SIZE, true)  // 48kHz stereo
+        )
+
+        var success = false
+        for (attempt in attempts) {
+            val rate = attempt[0] as Int
+            val channel = attempt[1] as Int
+            val chunk = attempt[2] as Int
+
+            if (!tryInitAudioRecord(rate, channel, chunk)) continue
+
+            try {
+                audioRecord?.startRecording()
+            } catch (e: Exception) {
+                android.util.Log.w("AudioCaptureManager", "startRecording 异常 rate=$rate: ${e.message}")
+                audioRecord?.release()
+                audioRecord = null
+                continue
+            }
+
+            // 检查 startRecording 是否真正成功（部分 HAL 不抛异常但内部失败）
+            if (audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                needsResampling = attempt[3] as Boolean
+                if (needsResampling) {
+                    android.util.Log.i("AudioCaptureManager", "使用回落格式: 48kHz stereo → 16kHz mono 重采样")
+                }
+                success = true
+                break
+            }
+
+            android.util.Log.w("AudioCaptureManager",
+                "startRecording 失败 rate=$rate, recordingState=${audioRecord?.recordingState}")
+            audioRecord?.release()
+            audioRecord = null
         }
 
-        if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+        if (!success) {
+            android.util.Log.e("AudioCaptureManager", "所有音频格式均不可用")
             audioRecord?.release()
             audioRecord = null
             return false
         }
 
-        audioRecord?.startRecording()
         isCapturing.set(true)
 
+        val chunkSize = if (needsResampling) FALLBACK_CHUNK_SIZE else CHUNK_SIZE
+
         captureJob = scope.launch {
-            val buffer = ByteArray(CHUNK_SIZE)
-            var totalRead = 0
-            while (isActive && isCapturing.get()) {
-                val read = audioRecord?.read(buffer, 0, CHUNK_SIZE) ?: break
+            val buffer = ByteArray(chunkSize)
+            while (isCapturing.get()) {
+                val read = audioRecord?.read(buffer, 0, chunkSize) ?: break
                 if (read > 0) {
-                    if (read == CHUNK_SIZE) {
-                        _audioStream.emit(buffer.copyOf())
+                    val rawData = if (read == chunkSize) buffer.copyOf()
+                    else buffer.copyOfRange(0, read)
+
+                    val outputData = if (needsResampling) {
+                        Resampler.resample48kStereoTo16kMono(rawData)
                     } else {
-                        // 部分读取：补零
-                        val data = ByteArray(CHUNK_SIZE)
-                        System.arraycopy(buffer, 0, data, 0, read)
-                        _audioStream.emit(data)
+                        rawData
                     }
-                    totalRead += read
+
+                    // 确保输出是 CHUNK_SIZE 长度（3200 bytes, 100ms @ 16kHz mono）
+                    if (outputData.size == CHUNK_SIZE) {
+                        _audioStream.emit(outputData)
+                    } else if (outputData.size < CHUNK_SIZE) {
+                        // 尾部不足 100ms，补齐
+                        val padded = ByteArray(CHUNK_SIZE)
+                        System.arraycopy(outputData, 0, padded, 0, outputData.size)
+                        _audioStream.emit(padded)
+                    } else {
+                        _audioStream.emit(outputData.copyOfRange(0, CHUNK_SIZE))
+                    }
                 } else if (read < 0) {
-                    // AudioRecord 错误
+                    android.util.Log.w("AudioCaptureManager", "AudioRecord read 返回 $read，停止采集")
                     break
                 }
             }
@@ -109,7 +139,45 @@ class AudioCaptureManager {
         return true
     }
 
-    /** 停止采集 */
+    /** 尝试以指定格式构建 AudioRecord，成功返回 true */
+    private fun tryInitAudioRecord(sampleRate: Int, channelConfig: Int, chunkSize: Int): Boolean {
+        try {
+            val minBuf = AudioRecord.getMinBufferSize(sampleRate, channelConfig, AUDIO_FORMAT)
+            val bufferSize = maxOf(if (minBuf > 0) minBuf else chunkSize * 4, chunkSize * 4)
+
+            audioRecord?.release()
+            audioRecord = AudioRecord.Builder()
+                .setAudioSource(MediaRecorder.AudioSource.MIC)
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AUDIO_FORMAT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(channelConfig)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize)
+                .build()
+
+            if (audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
+                android.util.Log.i("AudioCaptureManager",
+                    "AudioRecord 初始化成功: ${sampleRate}Hz, ${if (channelConfig == AudioFormat.CHANNEL_IN_MONO) "mono" else "stereo"}")
+                return true
+            }
+
+            android.util.Log.w("AudioCaptureManager",
+                "AudioRecord 初始化失败: state=${audioRecord?.state}, rate=$sampleRate")
+            audioRecord?.release()
+            audioRecord = null
+            return false
+        } catch (e: Exception) {
+            android.util.Log.w("AudioCaptureManager",
+                "AudioRecord 构建异常: rate=$sampleRate, ${e.message}")
+            audioRecord?.release()
+            audioRecord = null
+            return false
+        }
+    }
+
     fun stop() {
         isCapturing.set(false)
         captureJob?.cancel()
@@ -120,5 +188,6 @@ class AudioCaptureManager {
             audioRecord?.release()
         } catch (_: Exception) {}
         audioRecord = null
+        needsResampling = false
     }
 }

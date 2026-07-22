@@ -27,10 +27,17 @@ class TranscriptAdapter(
     companion object {
         /** 说话人 → 颜色索引缓存：避免每帧 bind 都重新计算 hashCode */
         private val speakerColorCache = mutableMapOf<String, Int>()
+        /**
+         * 主题色值懒缓存：ContextCompat.getColor() 含资源表查找 + 主题解析，
+         * 在 A55 小核上 bind 路径每帧 O(n) 次调用是慢 UI 线程贡献者之一。
+         * context 变化（如夜间模式切换）时 clear() 重建。TV 设备固定亮色模式无需考虑。
+         */
+        private val colorCache = mutableMapOf<Int, Int>()
+        private fun cachedColor(ctx: Context, resId: Int): Int =
+            colorCache.getOrPut(resId) { ContextCompat.getColor(ctx, resId) }
 
         private const val VIEW_TYPE_SEGMENT = 0
-        private const val VIEW_TYPE_INTERIM = 1
-        private const val VIEW_TYPE_TOPIC_HEADER = 2
+        private const val VIEW_TYPE_TOPIC_HEADER = 1
 
         private val SPEAKER_COLORS = intArrayOf(
             R.color.speaker_1,
@@ -44,25 +51,9 @@ class TranscriptAdapter(
         )
     }
 
-    private var interimText: String? = null
     private var searchQuery: String? = null
     fun setSearchQuery(query: String?) {
         searchQuery = if (query.isNullOrBlank()) null else query.lowercase()
-    }
-
-    fun setInterimText(text: String?) {
-        val newText = if (text.isNullOrBlank()) null else text
-        if (newText == interimText) return  // 文本未变（如计时器 tick 触发）不重绑
-        val hadInterim = interimText != null
-        val hasInterim = newText != null
-        interimText = newText
-
-        when {
-            !hadInterim && hasInterim -> notifyItemInserted(itemCount)
-            hadInterim && !hasInterim -> notifyItemRemoved(itemCount)
-            hadInterim && hasInterim -> notifyItemChanged(itemCount - 1)
-            else -> {}
-        }
     }
 
     /** 上次 submit 时的 segment 数量（用于直播模式检测新增增量） */
@@ -121,19 +112,11 @@ class TranscriptAdapter(
         return result
     }
 
-    override fun getItemCount(): Int {
-        return super.getItemCount() + if (interimText != null) 1 else 0
-    }
-
     override fun getItemViewType(position: Int): Int {
-        return if (interimText != null && position == itemCount - 1) {
-            VIEW_TYPE_INTERIM
-        } else {
-            val item = getItem(position)
-            when (item) {
-                is AdapterItem.TopicHeader -> VIEW_TYPE_TOPIC_HEADER
-                is AdapterItem.SegmentItem -> VIEW_TYPE_SEGMENT
-            }
+        val item = getItem(position)
+        return when (item) {
+            is AdapterItem.TopicHeader -> VIEW_TYPE_TOPIC_HEADER
+            is AdapterItem.SegmentItem -> VIEW_TYPE_SEGMENT
         }
     }
 
@@ -154,9 +137,6 @@ class TranscriptAdapter(
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (getItemViewType(position)) {
-            VIEW_TYPE_INTERIM -> {
-                (holder as SegmentViewHolder).bindInterim(interimText ?: "", holder.itemView.context)
-            }
             VIEW_TYPE_TOPIC_HEADER -> {
                 val item = getItem(position) as AdapterItem.TopicHeader
                 (holder as TopicHeaderViewHolder).bind(item)
@@ -192,7 +172,7 @@ class TranscriptAdapter(
             val colorIndex = TranscriptAdapter.speakerColorCache.getOrPut(segment.displaySpeaker) {
                 (segment.displaySpeaker.hashCode() and Integer.MAX_VALUE) % SPEAKER_COLORS.size
             }
-            val color = ContextCompat.getColor(context, SPEAKER_COLORS[colorIndex])
+            val color = cachedColor(context, SPEAKER_COLORS[colorIndex])
             speakerText.setTextColor(color)
 
             speakerText.setOnClickListener { onSpeakerClick?.invoke(segment) }
@@ -217,21 +197,11 @@ class TranscriptAdapter(
                 } else {
                     text = segment.text
                 }
-                setTextColor(ContextCompat.getColor(context, R.color.on_background))
+                setTextColor(cachedColor(context, R.color.on_background))
                 setTypeface(null, Typeface.NORMAL)
             }
 
             timeText.text = segment.formattedTime
-        }
-
-        fun bindInterim(text: String, context: Context) {
-            speakerText.visibility = View.GONE
-            timeText.visibility = View.VISIBLE
-            timeText.text = "..."
-
-            contentText.text = text
-            contentText.setTextColor(ContextCompat.getColor(context, R.color.interim_text))
-            contentText.setTypeface(contentText.typeface, Typeface.ITALIC)
         }
     }
 

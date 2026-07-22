@@ -40,8 +40,9 @@ android {
         buildConfigField("String", "ARK_API_KEY", "\"${secret("ARK_API_KEY")}\"")
         // 火山方舟推理端点 ID（如 ep-20250101123456-xxxxx）或模型名。优先使用此字段。
         buildConfigField("String", "ARK_ENDPOINT_ID", "\"${secret("ARK_ENDPOINT_ID")}\"")
-        // FunASR 云端 WebSocket 地址（自部署服务器）
-        buildConfigField("String", "FUNASR_CLOUD_URL", "\"${secret("FUNASR_CLOUD_URL")}\"")
+        // 豆包/火山引擎 ASR 配置
+        buildConfigField("String", "VOLCENGINE_ASR_API_KEY", "\"${secret("VOLCENGINE_ASR_API_KEY")}\"")
+        buildConfigField("String", "VOLCENGINE_ASR_ACCESS_TOKEN", "\"${secret("VOLCENGINE_ASR_ACCESS_TOKEN")}\"")
     }
 
     buildTypes {
@@ -67,11 +68,6 @@ android {
     buildFeatures {
         buildConfig = true
         viewBinding = true
-    }
-
-    // 禁止压缩 .onnx 模型文件（sherpa-onnx 需要）
-    aaptOptions {
-        noCompress("onnx")
     }
 
 }
@@ -103,8 +99,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
-    // --- 离线语音识别 (sherpa-onnx / FunASR SenseVoiceSmall) ---
-    implementation(files("libs/sherpa-onnx-1.12.29.aar"))
+    // --- 声纹识别 (CAM++, sherpa-onnx) ---
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 
     // --- JSON ---
     implementation("com.google.code.gson:gson:2.11.0")

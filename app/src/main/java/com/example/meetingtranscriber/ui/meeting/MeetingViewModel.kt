@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.meetingtranscriber.audio.AudioCaptureManager
-import com.example.meetingtranscriber.audio.SileroVadDetector
 import com.example.meetingtranscriber.audio.VADDetector
 import com.example.meetingtranscriber.audio.VoiceprintIdentifier
 import com.example.meetingtranscriber.audio.WavPlayer
@@ -45,17 +44,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     val summaryUseCase by lazy { SummaryUseCase(engineRouter) }
 
     val audioCaptureManager = AudioCaptureManager()
-    private val vadDetector = VADDetector()  // 能量 VAD（Silero 不可用时的回退）
-    /** Silero 神经网络 VAD：能量 VAD 会被 AGC 底噪骗过导致永不切轮（红米实测）。
-     *  ONNX 会话构建移到 IO 线程（原在主线程构造函数里，是切到会议 Tab 白屏元凶之一）；
-     *  加载完成前采集链路经 ?: 回退能量 VAD，startMeeting 会先 join 确保就绪 */
-    @Volatile private var sileroVad: SileroVadDetector? = null
-    private val sileroVadReady: Job = viewModelScope.launch(Dispatchers.IO) {
-        sileroVad = SileroVadDetector.create(application)
-    }
-    private val voiceprint = VoiceprintIdentifier(viewModelScope)
-    /** 本次会议是否启用声纹识别（本地 FunASR 引擎 + 模型加载成功） */
-    @Volatile private var voiceprintEnabled = false
+    private val vadDetector = VADDetector()  // 能量 VAD，仅用于 UI isSpeaking 指示
     private var wavRecorder: WavRecorder? = null
 
     private val _uiState = MutableStateFlow(MeetingUiState())
@@ -81,11 +70,36 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
      *  三段以上超长句的连续性判断必须用它而不是 last.sentenceId */
     private var lastAppendedSentenceId = -1L
 
-    /** VAD 连续沉默帧计数器（用于说话人切换检测） */
-    private var speakerGapFrames = 0
-    /** 停顿阈值（CHUNK_MS=100ms → 5帧=0.5秒）。Silero 自带 0.25s 静音判定，
-     *  实际停顿约 0.75s 即切轮；切分过碎由声纹合并兜底，切不开才是致命的 */
-    private val speakerGapThresholdFrames = 5
+    // ── 声纹识别（仅 Volcengine/豆包 模式启用） ──
+    private var voiceprintIdentifier: VoiceprintIdentifier? = null
+
+    // ── 时间轴：帧计数（每帧约 100ms，由 AudioCaptureManager 帧长决定） ──
+    private var frameCount = 0L
+
+    // ── VAD 切轮状态（用于声纹模式下的轮次切分） ──
+    private var wasVoice = false
+    private var currentTurnId = ""
+    private var turnCounter = 0
+    private var currentTurnStartMs = 0L
+
+    // 注：turnSpeakerMap / turnTimeRanges / pendingSentences 跨线程读写
+    // （IO 线程 processFrame+handleVolcengineSentence ↔ voiceprint 线程 onSpeakerIdentified），
+    // 所有访问均通过互斥锁保护，避免 ConcurrentModificationException。
+    private val voiceprintLock = Any()
+
+    /** 轮次 → 声纹标签（如 "turn_1" → "会议人1"） */
+    private val turnSpeakerMap = mutableMapOf<String, String>()
+
+    /** 轮次 → 起止时间 (startMs, endMs)，供 handleVolcengineSentence 查找归属 */
+    private val turnTimeRanges = mutableMapOf<String, Pair<Long, Long>>()
+
+    /** 声纹结果未就绪时的句子暂存（轮次 → 句子列表） */
+    private data class PendingSentence(
+        val text: String, val startMs: Long, val endMs: Long,
+        val sentenceId: Long, val isContinuation: Boolean
+    )
+    private val pendingSentences = mutableMapOf<String, MutableList<PendingSentence>>()
+
 
     // ── 音频管线扇出通道：WAV 存档与转写链各自独立背压 ──
     // 不能共用一条队列：加密 WAV 写入的 IO 抖动会拖慢 VAD/ASR 链，反之 final
@@ -128,10 +142,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
-        // ── 声纹判定结果（每轮必回调一次，label=null 表示无法判定）──
-        voiceprint.onIdentified = ::onSpeakerIdentified
-
-        // ── TranscriptionUseCase 状态收集（替代 deprecated asrProvider 回调）──
+        // ── TranscriptionUseCase 状态收集 ──
         viewModelScope.launch {
             transcriptionUseCase.interimText.collect { text ->
                 _uiState.update { it.copy(interimText = text) }
@@ -140,8 +151,15 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             transcriptionUseCase.sentenceFlow.collect { s ->
-                appendSegment(s.speakerId, s.text, s.startTimeMs, s.endTimeMs,
-                    s.sentenceId, s.isContinuation)
+                val engineType = transcriptionUseCase.currentEngine.value
+                if (engineType == com.example.meetingtranscriber.engine.AsrEngineType.VOLCENGINE_CLOUD) {
+                    // 豆包：服务端 speaker_info 不可靠，走本地声纹
+                    handleVolcengineSentence(s)
+                } else {
+                    // 通义听悟/其他：服务端 speaker_id 直接使用
+                    appendSegment(s.speakerId, s.text, s.startTimeMs, s.endTimeMs,
+                        s.sentenceId, s.isContinuation)
+                }
             }
         }
 
@@ -178,53 +196,55 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
 
     /**
      * 转写链单帧处理（分支 2 消费协程串行调用，100ms/帧）：
-     * VAD（UI 指示 + 说话人切换）→ 声纹累积 → ASR 喂入。
-     * SenseVoice 是批处理引擎：只累积音频，decode 在 VAD 停顿或结束会议时触发。
+     * VAD（UI 指示 + 声纹切轮）→ 声纹 feed → ASR 喂入。
+     *
+     * - 通义听悟: 服务端 diarization，声纹不介入
+     * - 豆包/Volcengine: 本地 CAM++ 声纹，VAD 边沿切轮
      */
     private fun processFrame(pcmData: ByteArray) {
-        val isVoice = sileroVad?.isVoice(pcmData) ?: vadDetector.isVoice(pcmData)
-        // 透传给本地引擎：静音期跳过 interim decode（volatile 写，无开销）
-        transcriptionUseCase.setVoiceActive(isVoice)
+        // 1. 能量 VAD — UI 指示 + 声纹切轮边沿
+        val isVoice = vadDetector.isVoice(pcmData)
         if (_uiState.value.isSpeaking != isVoice) {
             _uiState.update { it.copy(isSpeaking = isVoice) }
-            android.util.Log.d("MeetingViewModel",
-                if (isVoice) "VAD: 语音开始" else "VAD: 静音开始")
         }
-        if (isVoice) {
-            speakerGapFrames = 0
-            // 声纹只累积人声帧（静音会稀释声纹向量）
-            if (voiceprintEnabled) voiceprint.feed(pcmData)
-        } else {
-            // 限制计数上限防止溢出
-            if (speakerGapFrames < speakerGapThresholdFrames + 50) {
-                speakerGapFrames++
+
+        // 2. 声纹切轮 + feed（仅豆包模式下启用）
+        val vp = voiceprintIdentifier
+        if (vp != null && vp.isEnabled) {
+            // 静音 → 语音：新轮次开始
+            if (!wasVoice && isVoice) {
+                turnCounter++
+                currentTurnId = "turn_$turnCounter"
+                currentTurnStartMs = frameCount * FRAME_DURATION_MS
+                android.util.Log.d("MeetingViewModel",
+                    "声纹轮次开始: $currentTurnId @${currentTurnStartMs}ms")
             }
-            // 沉默刚满阈值当帧立即切句定稿（== 保证每段沉默只触发一次）。
-            // 不能等语音恢复才切：定稿会被拖到下一人开口后（实测多等
-            // 1-3s，对方不说话就一直不定稿），且 decode 白白多算静音尾巴
-            if (speakerGapFrames == speakerGapThresholdFrames) {
-                try {
-                    val endedTurn = transcriptionUseCase.switchSpeaker()
-                    // 真正切轮时声纹判定上一轮身份（不足 1s 跳过则继续累积）
-                    if (voiceprintEnabled && endedTurn != null) {
-                        voiceprint.onTurnEnded(endedTurn)
-                    }
-                    android.util.Log.d("MeetingViewModel",
-                        "沉默 ${speakerGapFrames * 100}ms → 切句定稿")
-                } catch (e: Exception) {
-                    android.util.Log.e("MeetingViewModel",
-                        "说话人切换异常: ${e.message}")
+            // 语音持续：累积声纹样本
+            if (isVoice) {
+                vp.feed(pcmData)
+            }
+            // 语音 → 静音：轮次结束，触发异步声纹识别
+            if (wasVoice && !isVoice) {
+                // 记录本轮的结束时间戳
+                val endMs = frameCount * FRAME_DURATION_MS
+                synchronized(voiceprintLock) {
+                    turnTimeRanges[currentTurnId] = (currentTurnStartMs to endMs)
                 }
+                vp.onTurnEnded(currentTurnId)
+                android.util.Log.d("MeetingViewModel",
+                    "声纹轮次结束: $currentTurnId (${currentTurnStartMs}-${endMs}ms)")
             }
+            wasVoice = isVoice
         }
-        // 所有帧无条件喂 ASR：转写不依赖 VAD 判定（VAD 只管切轮与 UI），
-        // VAD 误判静音时转写不断粮；SenseVoice 批处理引擎，静音无害
+
+        // 3. ASR 无条件喂入（服务端自行 VAD）
         try {
             transcriptionUseCase.processAudio(pcmData)
         } catch (e: Exception) {
             android.util.Log.e("MeetingViewModel",
                 "processAudio 异常: ${e.message}")
         }
+        frameCount++
     }
 
     /** 在线/离线会议 — 引擎自动路由 */
@@ -248,9 +268,21 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 _segments.value = emptyList()
                 lastAppendedSentenceId = -1L
                 speakerLabelMap.clear()
-                lastIdentifiedLabel = null
-                speakerGapFrames = 0
                 pendingSegmentsForRecovery.clear()
+
+                // 重置声纹状态
+                voiceprintIdentifier?.releaseModel()
+                voiceprintIdentifier = null
+                frameCount = 0L
+                wasVoice = false
+                turnCounter = 0
+                currentTurnId = ""
+                currentTurnStartMs = 0L
+                synchronized(voiceprintLock) {
+                    turnSpeakerMap.clear()
+                    turnTimeRanges.clear()
+                    pendingSentences.clear()
+                }
 
                 if (!audioCaptureManager.hasPermission()) {
                     _uiState.update { it.copy(errorMessage = "缺少录音权限") }
@@ -263,8 +295,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 createdMeetingId = currentMeetingId
                 meetingStartTime = System.currentTimeMillis()
 
-                // Silero VAD 后台加载兜底：确保开会时神经 VAD 已就绪（通常早已完成，join 为零成本）
-                sileroVadReady.join()
                 // AudioRecord 构建 + startRecording 含系统服务 IPC，移出主线程
                 val started = withContext(Dispatchers.IO) { audioCaptureManager.start() }
                 if (!started) {
@@ -298,10 +328,21 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                // 本地引擎才启用声纹识别（云端有服务端分离）；模型加载失败则降级为轮次递增
-                voiceprintEnabled = transcriptionUseCase.isLocalFunAsr() &&
-                    withContext(Dispatchers.IO) { voiceprint.initialize(getApplication()) }
-                if (voiceprintEnabled) voiceprint.reset()
+                // 豆包模式下初始化本地声纹识别
+                val engineType = transcriptionUseCase.currentEngine.value
+                if (engineType == com.example.meetingtranscriber.engine.AsrEngineType.VOLCENGINE_CLOUD) {
+                    val vp = VoiceprintIdentifier(viewModelScope)
+                    vp.onIdentified = { turnId, label ->
+                        onSpeakerIdentified(turnId, label)
+                    }
+                    if (vp.initialize(getApplication())) {
+                        voiceprintIdentifier = vp
+                        android.util.Log.i("MeetingViewModel", "声纹识别已启用 (CAM++)")
+                    } else {
+                        android.util.Log.w("MeetingViewModel", "声纹模型加载失败，豆包模式下说话人标签将不可用")
+                        voiceprintIdentifier = null
+                    }
+                }
 
                 _uiState.update { it.copy(
                     isMeetingActive = true,
@@ -328,6 +369,8 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
      */
     private suspend fun abortStartup(createdMeetingId: Long) {
         isStartingMeeting = false
+        voiceprintIdentifier?.releaseModel()
+        voiceprintIdentifier = null
         try { audioCaptureManager.stop() } catch (_: Exception) {}
         try { wavRecorder?.cancel() } catch (_: Exception) {}
         wavRecorder = null
@@ -371,9 +414,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             _uiState.update { it.copy(errorMessage = msg) }
             return false
         }
-        speakerGapFrames = 0
         vadDetector.reset()
-        sileroVad?.reset()
         return true
         } finally {
             asrConnecting = false
@@ -403,16 +444,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             delay(150)
             wavRecorder?.stop()
             wavRecorder = null
-            // 声纹判定最后一轮（需在引擎释放前取当前轮次 id）
-            if (voiceprintEnabled) {
-                transcriptionUseCase.flushSpeakerTurn()?.let { voiceprint.onTurnEnded(it) }
-            }
             transcriptionUseCase.stop()
-
-            // 内存编排：会议已结束，声纹模型（27MB）无用武之地，先释放；
-            // 纪要若走云端 LLM 无需本地内存开销；
-            // 下次 startMeeting 会重新 initialize（<300ms）
-            if (voiceprintEnabled) voiceprint.releaseModel()
 
             val meeting = meetingRepository.endMeeting(currentMeetingId)
             recoveryStateDao.delete(currentMeetingId)
@@ -428,6 +460,15 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             // 清空转写列表，避免二次进入时残留旧数据
             _segments.value = emptyList()
             speakerLabelMap.clear()
+
+            // 释放声纹模型（26MB ONNX，会后腾出内存）
+            voiceprintIdentifier?.releaseModel()
+            voiceprintIdentifier = null
+            synchronized(voiceprintLock) {
+                turnSpeakerMap.clear()
+                turnTimeRanges.clear()
+                pendingSentences.clear()
+            }
 
             if (meeting != null) {
                 generateSummary(meeting)
@@ -547,51 +588,158 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** 声纹尚未出结果时沿用的最近已识别身份（首轮兜底"会议人1"） */
-    private var lastIdentifiedLabel: String? = null
+    /** 说话人标签映射 persist（speakerId → "会议人N"），用于 UI speakerLabels 和 speakerCount */
+
     /** 语气词与标点（段落只含这些字符则视为静音幻觉，不入库） */
     private val fillerChars = Regex("[嗯啊呃哦哎唉喔噢呀嘛哈哼呵\\s，。,.!！?？、~…]")
 
     /**
-     * 声纹判定落地：更新标签映射，并把该轮已入库/在屏的段落统一修正。
-     * identified=null（人声不足/异常）→ 就近归属最近身份，兜底"会议人1"。
+     * 通义听悟路径：用服务端 speakerId 解析为 displaySpeaker，再委托
+     * [appendSegmentWithSpeaker] 完成文本处理+合并+入库。
      */
-    private fun onSpeakerIdentified(turnId: String, identified: String?) {
-        viewModelScope.launch {
-            val label = identified ?: (lastIdentifiedLabel ?: "会议人1")
-            lastIdentifiedLabel = label
-            speakerLabelMap[turnId] = label
-            // 该轮在屏/入库段落与判定不一致（就近沿用的标签判错）才修正；
-            // 一致时跳过 DB UPDATE + 全列表 copy（每轮全量修正是低端机卡顿源之一）
-            if (_segments.value.any { it.speakerId == turnId && it.displaySpeaker != label }) {
-                transcriptRepository.renameSpeaker(currentMeetingId, turnId, label)
-                _segments.update { list ->
-                    list.map { if (it.speakerId == turnId) it.copy(displaySpeaker = label) else it }
-                }
-            }
-            _uiState.update { it.copy(
-                speakerLabels = speakerLabelMap.toMap(),
-                speakerCount = speakerLabelMap.values.toSet().size
-            ) }
-            // 会议已结束后才到达的判定（最后一轮）→ 修正 meeting 行的 speakerCount
-            if (!_uiState.value.isMeetingActive && currentMeetingId != 0L) {
-                meetingRepository.updateSpeakerCount(currentMeetingId)
-            }
-        }
-    }
-
     private fun appendSegment(
         speakerId: String, text: String, startMs: Long, endMs: Long,
         sentenceId: Long, isContinuation: Boolean = false
     ) {
+        val label = speakerLabelMap.getOrPut(speakerId) {
+            "会议人${speakerLabelMap.size + 1}"
+        }
+        // speakerId 作为 TranscriptSegment.speakerId（原始标识），displaySpeaker 用 label
+        appendSegmentWithSpeaker(label, text, startMs, endMs, sentenceId, isContinuation,
+            rawSpeakerId = speakerId)
+    }
+
+    private fun uiStateHasSpeaker(speakerId: String): Boolean =
+        _uiState.value.speakerLabels.containsKey(speakerId)
+
+    // ═══════════════════════════════════════════════════════════
+    // 声纹路由（豆包/Volcengine 模式下替代服务端 speakerId）
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * 豆包模式下 ASR 句子到达：按时间查归属轮次，声纹就绪则直接追加，
+     * 否则暂存到 [pendingSentences] 等待 [onSpeakerIdentified] flush。
+     */
+    private fun handleVolcengineSentence(s: AsrSentence) {
+        val turnId = findTurnForTime(s.startTimeMs)
+        if (turnId == null) {
+            val fallbackLabel = synchronized(voiceprintLock) {
+                speakerLabelMap.getOrPut("0") { "会议人${speakerLabelMap.size + 1}" }
+            }
+            appendSegmentWithSpeaker(fallbackLabel, s.text, s.startTimeMs, s.endTimeMs,
+                s.sentenceId, s.isContinuation)
+            return
+        }
+
+        val label = synchronized(voiceprintLock) { turnSpeakerMap[turnId] }
+        if (label != null) {
+            // 声纹已就绪 → 直接落句
+            appendSegmentWithSpeaker(label, s.text, s.startTimeMs, s.endTimeMs,
+                s.sentenceId, s.isContinuation)
+        } else {
+            // 声纹还在跑 → 缓冲
+            synchronized(voiceprintLock) {
+                pendingSentences.getOrPut(turnId) { mutableListOf() }
+                    .add(PendingSentence(s.text, s.startTimeMs, s.endTimeMs,
+                        s.sentenceId, s.isContinuation))
+            }
+        }
+    }
+
+    /**
+     * 声纹识别回调：将 VAD 轮次映射为持久化说话人标签，并 flush 该轮次缓冲句子。
+     *
+     * 在线程"voiceprint"上回调（见 [VoiceprintIdentifier.embeddingDispatcher]），
+     * 更新 speakerLabelMap / turnSpeakerMap / turnTimeRanges 后通过 ViewModelScope
+     * 在主线程安全追加 UI 段落。
+     */
+    private fun onSpeakerIdentified(turnId: String, label: String?) {
+        // 快照：在锁内完成 map 更新 + 取走缓冲句子，锁外再做 UI/DB 操作
+        val effectiveLabel: String
+        val toFlush: List<PendingSentence>
+        val labelSnapshot: Map<String, String>
+        synchronized(voiceprintLock) {
+            if (label == null) {
+                effectiveLabel = "会议人${speakerLabelMap.size + 1}"
+                turnSpeakerMap[turnId] = effectiveLabel
+            } else {
+                if (!speakerLabelMap.containsValue(label)) {
+                    speakerLabelMap[label] = label
+                }
+                turnSpeakerMap[turnId] = label
+                effectiveLabel = label
+            }
+            toFlush = pendingSentences.remove(turnId)?.toList() ?: emptyList()
+            labelSnapshot = speakerLabelMap.toMap()
+        }
+
+        // UI 更新 + flush（lock 外，避免阻塞 voiceprint 线程）
+        _uiState.update { it.copy(
+            speakerLabels = labelSnapshot,
+            speakerCount = labelSnapshot.values.toSet().size
+        ) }
+
+        toFlush.forEach { ps ->
+            appendSegmentWithSpeaker(effectiveLabel, ps.text, ps.startMs, ps.endMs,
+                ps.sentenceId, ps.isContinuation)
+        }
+    }
+
+    /**
+     * 按句子起始时间查找所属 VAD 轮次。
+     *
+     * 策略：遍历 [turnTimeRanges]，找 startMs ≤ sentenceStartMs 且 endMs ≥ sentenceStartMs
+     * 的轮次。若多发命中（时间窗重叠），取 startMs 最大者（最近一轮）。
+     * 若无完全覆盖的 → 找 startMs ≤ sentenceStartMs 中最晚的一轮（句子可能落在轮次结束后）。
+     */
+    private fun findTurnForTime(sentenceStartMs: Long): String? {
+        // 快照 turnTimeRanges（IO 线程并发写入），避免遍历中 ConcurrentModificationException
+        val ranges = synchronized(voiceprintLock) { turnTimeRanges.toMap() }
+        if (ranges.isEmpty()) return null
+
+        // 精确命中：句子开始时间在某个轮次时间窗内
+        val exact = ranges.entries
+            .filter { (_, range) -> sentenceStartMs in range.first..range.second }
+            .maxByOrNull { (_, range) -> range.first }
+        if (exact != null) return exact.key
+
+        // 宽松匹配：句子在某个轮次结束后不久到达（ASR 延迟）
+        // 取 startMs ≤ sentenceStartMs 且 gap 在 5000ms 以内的最近轮次
+        val close = ranges.entries
+            .filter { (_, range) -> range.first <= sentenceStartMs }
+            .minByOrNull { (_, range) -> sentenceStartMs - range.first }
+        if (close != null && (sentenceStartMs - close.value.first) <= 5000L) {
+            return close.key
+        }
+
+        // 最后兜底：返回距离最近的轮次（限制在 10000ms 以内，超出视为不匹配）
+        val nearest = ranges.entries
+            .minByOrNull { (_, range) -> kotlin.math.abs(sentenceStartMs - range.first) }
+        if (nearest != null && kotlin.math.abs(sentenceStartMs - nearest.value.first) <= 10000L) {
+            return nearest.key
+        }
+        return null
+    }
+
+    /**
+     * 用指定 speaker 标签追加句子。通义听悟路径由 [appendSegment] 解析 label 后
+     * 委托至此；豆包/声纹路径直接调用，speaker 即为声纹返回标签。
+     *
+     * @param speaker        显示标签（如 "会议人1"）
+     * @param rawSpeakerId   TranscriptSegment.speakerId 原始标识，为 null 时复用 speaker
+     */
+    private fun appendSegmentWithSpeaker(
+        speaker: String, text: String, startMs: Long, endMs: Long,
+        sentenceId: Long, isContinuation: Boolean,
+        rawSpeakerId: String? = null
+    ) {
         val formattedText = TextFormatter.spokenNumberToDigits(TextFormatter.format(text))
-        // 纯语气词/标点段落不入库：多为静音期 ASR 幻觉（如连续"嗯"），无信息量
         if (formattedText.replace(fillerChars, "").isBlank()) return
 
-        // 续段合并：本句是上一句被软/硬截断后的延续（同一说话人、句号连续）→
-        // 拼回上一条，屏幕/数据库/导出都保持完整一句
+        val segSpeakerId = rawSpeakerId ?: speaker
+
         val last = _segments.value.lastOrNull()
-        if (isContinuation && last != null && last.speakerId == speakerId &&
+        if (isContinuation && last != null && last.speakerId == segSpeakerId &&
             lastAppendedSentenceId == sentenceId - 1
         ) {
             val merged = last.copy(text = last.text + formattedText, endTimeMs = endMs)
@@ -599,26 +747,24 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             _uiState.update { it.copy(interimText = "") }
             lastAppendedSentenceId = sentenceId
             viewModelScope.launch {
-                // DB 行按首段 sentenceId 定位（merged 保留的就是它）
                 transcriptRepository.mergeContinuation(
                     currentMeetingId, merged.sentenceId, merged.text, merged.endTimeMs)
             }
             return
         }
 
-        val label = if (voiceprintEnabled) {
-            // 声纹模式：结果未到先沿用最近识别的身份（首轮兜底"会议人1"），
-            // 声纹判定后若不一致由 onSpeakerIdentified 统一修正——不再显示"识别中…"占位
-            speakerLabelMap[speakerId] ?: lastIdentifiedLabel ?: "会议人1"
-        } else {
-            speakerLabelMap.getOrPut(speakerId) {
-                "会议人${speakerLabelMap.size + 1}"
+        // 兜底：如果 speaker 标签未在 speakerLabelMap 中注册，补充注册
+        // 注：voiceprint 线程和主线程并发访问，加锁保护
+        synchronized(voiceprintLock) {
+            if (!speakerLabelMap.containsValue(speaker)) {
+                speakerLabelMap[speaker] = speaker
             }
         }
+
         val segment = TranscriptSegment(
             meetingId = currentMeetingId,
-            speakerId = speakerId,
-            displaySpeaker = label,
+            speakerId = segSpeakerId,
+            displaySpeaker = speaker,
             text = formattedText,
             startTimeMs = startMs,
             endTimeMs = endMs,
@@ -627,9 +773,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         _segments.update { it + segment }
         lastAppendedSentenceId = sentenceId
         pendingSegmentsForRecovery.add(segment)
-        // speakerLabelMap 每轮次一个 key，长会议达数百条——只有本句实际新增轮次
-        // 时才做 toMap/toSet 全量拷贝（声纹模式的标签由 onSpeakerIdentified 更新）
-        if (!voiceprintEnabled && !uiStateHasSpeaker(speakerId)) {
+        if (!uiStateHasSpeaker(speaker)) {
             _uiState.update { it.copy(
                 interimText = "",
                 speakerLabels = speakerLabelMap.toMap(),
@@ -642,9 +786,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             transcriptRepository.saveSegment(segment)
         }
     }
-
-    private fun uiStateHasSpeaker(speakerId: String): Boolean =
-        _uiState.value.speakerLabels.containsKey(speakerId)
 
     private fun generateSummary(meeting: MeetingInfo) {
         viewModelScope.launch {
@@ -799,9 +940,9 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             // 被销毁（进程回收等）时必须保留已录内容，配合恢复机制续会
             wavRecorder?.stop()
             wavRecorder = null
+            voiceprintIdentifier?.releaseModel()
+            voiceprintIdentifier = null
         }
-        voiceprint.release()
-        sileroVad?.release()
         stopTimer()
     }
 
@@ -858,6 +999,18 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             val mapType = object : TypeToken<Map<String, String>>() {}.type
             speakerLabelMap.putAll(Gson().fromJson(state.speakerLabelMapJson, mapType))
 
+            // 重置声纹追踪状态（崩溃前内存数据已丢失，从零开始）
+            frameCount = 0L
+            wasVoice = false
+            turnCounter = 0
+            currentTurnId = ""
+            currentTurnStartMs = 0L
+            synchronized(voiceprintLock) {
+                turnSpeakerMap.clear()
+                turnTimeRanges.clear()
+                pendingSentences.clear()
+            }
+
             val listType = object : TypeToken<List<TranscriptSegment>>() {}.type
             val pendingSegments: List<TranscriptSegment> = Gson().fromJson(state.pendingSegmentsJson, listType)
             pendingSegmentsForRecovery.clear()
@@ -882,6 +1035,22 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             connectAsr(_uiState.value.selectedLanguage)
+
+            // 豆包模式下重新初始化本地声纹识别
+            val engineType = transcriptionUseCase.currentEngine.value
+            if (engineType == com.example.meetingtranscriber.engine.AsrEngineType.VOLCENGINE_CLOUD) {
+                val vp = VoiceprintIdentifier(viewModelScope)
+                vp.onIdentified = { turnId, label ->
+                    onSpeakerIdentified(turnId, label)
+                }
+                if (vp.initialize(getApplication())) {
+                    voiceprintIdentifier = vp
+                    android.util.Log.i("MeetingViewModel", "声纹识别已恢复 (CAM++)")
+                } else {
+                    voiceprintIdentifier = null
+                }
+            }
+
             // 回放溢出音频
             state.audioBufferFilePath?.let { path ->
                 val overflowFile = File(path)
@@ -897,5 +1066,10 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             startTimer()
             startRecoverySaver()
         }
+    }
+
+    companion object {
+        /** 音频帧时长（ms），与 AudioCaptureManager 100ms/帧一致 */
+        private const val FRAME_DURATION_MS = 100L
     }
 }

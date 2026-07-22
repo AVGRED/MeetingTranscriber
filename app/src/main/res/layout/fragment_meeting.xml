@@ -4,8 +4,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/background">
+    android:layout_height="match_parent">
 
     <!-- 顶部工具栏 -->
     <LinearLayout
@@ -195,6 +194,24 @@
         app:layout_constraintTop_toBottomOf="@id/tv_error"
         tools:visibility="visible" />
 
+    <!-- Interim text：实时未定稿词汇，独立于 RecyclerView，避免频繁 notifyItemInserted/Removed -->
+    <TextView
+        android:id="@+id/tv_interim"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:textSize="16sp"
+        android:textColor="@color/interim_text"
+        android:textStyle="italic"
+        android:lineSpacingExtra="6dp"
+        android:visibility="gone"
+        android:background="@color/surface_variant"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        tools:text="正在转写中..." />
+
     <!-- 转写列表 -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv_transcript"
@@ -203,7 +220,7 @@
         android:padding="12dp"
         android:clipToPadding="false"
         app:layout_constraintTop_toBottomOf="@id/progress_summary"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/tv_interim"
         tools:listitem="@layout/item_transcript_segment" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -8,7 +8,12 @@ import com.example.meetingtranscriber.audio.AudioCacheManager
 import com.example.meetingtranscriber.data.db.AppDatabase
 import com.example.meetingtranscriber.data.db.RecoveryStateEntity
 import com.example.meetingtranscriber.engine.EngineRouter
-import com.example.meetingtranscriber.engine.asr.*
+import com.example.meetingtranscriber.engine.asr.TingwuEngine
+import com.example.meetingtranscriber.engine.asr.VolcengineEngine
+import com.example.meetingtranscriber.engine.asr.ParaformerEngine
+import com.example.meetingtranscriber.engine.asr.XfyunEngine
+import com.example.meetingtranscriber.engine.asr.TencentAsrEngine
+import com.example.meetingtranscriber.engine.asr.BaiduAsrEngine
 import com.example.meetingtranscriber.engine.llm.DoubaoEngine
 import com.example.meetingtranscriber.engine.llm.DashScopeEngine
 import com.example.meetingtranscriber.engine.llm.OpenAiCompatEngine
@@ -32,16 +37,11 @@ class MeetingApplication : Application() {
         val recoveryCheckDone = CompletableDeferred<Unit>()
     }
 
-    /** 本地 ASR 引擎（模型常驻，跨会议复用；启动时后台预加载） */
-    private val funAsrLocal by lazy { FunAsrEngine(this) }
-
     /** 引擎路由器（懒加载单例） */
     val engineRouter: EngineRouter by lazy {
         val prefs = PreferencesManager(this)
         EngineRouter(
             prefs = prefs,
-            funAsrEngine = funAsrLocal,
-            funAsrCloudEngine = FunAsrCloudEngine(prefs),
             tingwuEngine = TingwuEngine(prefs),
             volcengineEngine = VolcengineEngine(prefs),
             cloudAsrEngines = mapOf(
@@ -71,11 +71,6 @@ class MeetingApplication : Application() {
             prefs.warmUp() // 预热 EncryptedSharedPreferences，避免主线程首触付出 Keystore 成本
             checkRecoveryState()
             recoveryCheckDone.complete(Unit)
-            // 默认本地引擎时预加载 ASR 模型（226MB 需 3-4s）：首次开会免等
-            if (prefs.preferredAsrEngine ==
-                com.example.meetingtranscriber.engine.AsrEngineType.FUNASR_LOCAL) {
-                funAsrLocal.initialize(this@MeetingApplication)
-            }
             cleanupExpiredRecordings()
             AudioCacheManager.trim(this@MeetingApplication)
             StorageMonitor.maybeNotify(this@MeetingApplication)

@@ -27,10 +27,6 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
     private val _autoFallback = MutableStateFlow(prefs.autoFallback)
     val autoFallback: StateFlow<Boolean> = _autoFallback
 
-    // ── FunASR 云端 URL ──
-    private val _funasrCloudUrl = MutableStateFlow(prefs.funasrCloudUrl)
-    val funasrCloudUrl: StateFlow<String> = _funasrCloudUrl
-
     // ── 密钥（加密存储，读取含 Keystore/AES 解密：初值空串，IO 协程回填，
     //     不能在主线程构造函数里同步解密 8 个值） ──
     private val _tingwuAkId = MutableStateFlow("")
@@ -100,11 +96,6 @@ class ApiConfigViewModel(application: Application) : AndroidViewModel(applicatio
     fun setAutoFallback(enabled: Boolean) {
         prefs.autoFallback = enabled
         _autoFallback.value = enabled
-    }
-
-    fun setFunasrCloudUrl(url: String) {
-        prefs.funasrCloudUrl = url
-        _funasrCloudUrl.value = url
     }
 
     fun saveTingwuKeys(akId: String, akSecret: String, appKey: String) {

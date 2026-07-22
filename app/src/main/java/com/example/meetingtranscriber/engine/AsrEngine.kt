@@ -66,8 +66,6 @@ enum class AsrEngineType(
     /** 支持的方言列表 */
     val dialectSupport: List<String> = listOf("普通话", "四川话", "粤语")
 ) {
-    FUNASR_CLOUD("FunASR 云端", isCloud = true),
-    FUNASR_LOCAL("FunASR", isCloud = false),
     TINGWU_CLOUD("通义听悟", isCloud = true),
     VOLCENGINE_CLOUD("豆包 ASR", isCloud = true, dialectSupport = listOf("普通话")),
     PARAFORMER_CLOUD("阿里 Paraformer", isCloud = true, dialectSupport = listOf("普通话", "粤语")),

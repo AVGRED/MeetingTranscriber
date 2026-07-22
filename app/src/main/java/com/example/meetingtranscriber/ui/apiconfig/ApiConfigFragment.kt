@@ -62,7 +62,6 @@ class ApiConfigFragment : Fragment() {
     }
 
     private fun updateAsrCardVisibility(type: AsrEngineType) {
-        binding.cardFunasrCloud.visibility = if (type == AsrEngineType.FUNASR_CLOUD) View.VISIBLE else View.GONE
         binding.cardTingwu.visibility = if (type == AsrEngineType.TINGWU_CLOUD) View.VISIBLE else View.GONE
         binding.cardVolcengine.visibility = if (type == AsrEngineType.VOLCENGINE_CLOUD) View.VISIBLE else View.GONE
         val provider = CloudAsrProvider.of(type)
@@ -128,7 +127,6 @@ class ApiConfigFragment : Fragment() {
     // ═══════════════════════════════════════════════════════════
 
     private fun setupClickListeners() {
-        // FunASR Cloud URL (saved as user types — simplified, real app would use debounce)
         // 通义听悟
         binding.btnSaveTingwu.setOnClickListener {
             val akId = binding.etTingwuAkId.text?.toString() ?: ""
@@ -268,13 +266,6 @@ class ApiConfigFragment : Fragment() {
                         binding.switchAutoFallback.isChecked = enabled
                     }
                 }
-                launch {
-                    viewModel.funasrCloudUrl.collect { url ->
-                        if (binding.etFunasrUrl.text?.toString() != url) {
-                            binding.etFunasrUrl.setText(url)
-                        }
-                    }
-                }
             }
         }
 
@@ -320,16 +311,6 @@ class ApiConfigFragment : Fragment() {
 
     private fun showApiGuide() {
         val message = """
-            【FunASR 云端】— WebSocket 地址
-
-            自部署 FunASR 服务端后获得，例如：
-            ws://your-server:10095
-            或 wss://your-domain.com/ws
-
-            部署指南：https://github.com/modelscope/FunASR
-
-            ━━━━━━━━━━━━━━━━━━━━━━
-
             【通义听悟】— 阿里云实时语音识别
 
             ① 登录阿里云控制台：

@@ -4,8 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.example.meetingtranscriber.PreferencesManager
 import com.example.meetingtranscriber.engine.asr.CloudAsrProvider
-import com.example.meetingtranscriber.engine.asr.FunAsrCloudEngine
-import com.example.meetingtranscriber.engine.asr.FunAsrEngine
 import com.example.meetingtranscriber.network.NetworkMonitor
 import kotlinx.coroutines.flow.StateFlow
 
@@ -27,9 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
  */
 class EngineRouter(
     private val prefs: PreferencesManager,
-    private val funAsrEngine: FunAsrEngine,
     // 云端引擎由外部注入（参见 Application 初始化）
-    private var funAsrCloudEngine: FunAsrCloudEngine? = null,
     private var tingwuEngine: AsrEngine? = null,
     private var volcengineEngine: AsrEngine? = null,
     /** 通用云端 ASR（阿里 Paraformer/讯飞/腾讯云/百度），按类型索引 */
@@ -43,13 +39,11 @@ class EngineRouter(
     // ── 公开属性：允许外部延迟注入 ──
 
     fun setCloudEngines(
-        funAsrCloud: FunAsrCloudEngine? = null,
         tingwu: AsrEngine? = null,
         volcengine: AsrEngine? = null,
         doubao: LlmEngine? = null,
         dashScope: LlmEngine? = null
     ) {
-        if (funAsrCloud != null) funAsrCloudEngine = funAsrCloud
         if (tingwu != null) tingwuEngine = tingwu
         if (volcengine != null) volcengineEngine = volcengine
         if (doubao != null) doubaoEngine = doubao
@@ -74,41 +68,9 @@ class EngineRouter(
         logRoute("ASR", preferred.displayName, hasNetwork)
 
         return when {
-            // ── 本地引擎：sherpa-onnx SenseVoiceSmall ──
-            preferred == AsrEngineType.FUNASR_LOCAL -> {
-                ensureInitializedOrThrow(context, funAsrEngine)
-                funAsrEngine
-            }
-
-            // ── 无网络 → 自动降级本地引擎 ──
+            // ── 无网络 → 直接报错（无本地引擎） ──
             !hasNetwork -> {
-                Log.i(TAG, "🌐 无网络，自动降级到本地 FunASR")
-                ensureInitializedOrThrow(context, funAsrEngine)
-                funAsrEngine
-            }
-
-            // ── FunASR 云端 ──
-            preferred == AsrEngineType.FUNASR_CLOUD -> {
-                if (prefs.hasFunAsrCloudUrl() && funAsrCloudEngine != null) {
-                    ensureInitializedOrThrow(context, funAsrCloudEngine!!)
-                    funAsrCloudEngine!!
-                } else if (prefs.autoFallback && prefs.hasTingwuKeys() && tingwuEngine != null) {
-                    Log.w(TAG, "FunASR 云端地址未配置 → 降级到通义听悟")
-                    ensureInitializedOrThrow(context, tingwuEngine!!)
-                    tingwuEngine!!
-                } else if (prefs.autoFallback && prefs.hasVolcengineKeys() && volcengineEngine != null) {
-                    Log.w(TAG, "FunASR 云端地址未配置 → 降级到豆包 ASR")
-                    ensureInitializedOrThrow(context, volcengineEngine!!)
-                    volcengineEngine!!
-                } else if (prefs.autoFallback) {
-                    Log.w(TAG, "无可用云端引擎 → 降级到本地 FunASR")
-                    ensureInitializedOrThrow(context, funAsrEngine)
-                    funAsrEngine
-                } else {
-                    throw NoEngineException(
-                        "FunASR 云端地址未配置。请在「API 配置」页面设置 WebSocket URL，" +
-                        "或切换到通义听悟/豆包 ASR 并配置相应密钥。")
-                }
+                throw NoEngineException("网络不可用，无法使用云端 ASR。请检查网络连接后重试。")
             }
 
             // ── 通义听悟 ──
@@ -116,14 +78,10 @@ class EngineRouter(
                 if (prefs.hasTingwuKeys() && tingwuEngine != null) {
                     ensureInitializedOrThrow(context, tingwuEngine!!)
                     tingwuEngine!!
-                } else if (prefs.autoFallback && prefs.hasFunAsrCloudUrl() && funAsrCloudEngine != null) {
-                    Log.w(TAG, "通义听悟 Key 未配置 → 降级到 FunASR 云端")
-                    ensureInitializedOrThrow(context, funAsrCloudEngine!!)
-                    funAsrCloudEngine!!
-                } else if (prefs.autoFallback) {
-                    Log.w(TAG, "无可用云端引擎 → 降级到本地 FunASR")
-                    ensureInitializedOrThrow(context, funAsrEngine)
-                    funAsrEngine
+                } else if (prefs.autoFallback && prefs.hasVolcengineKeys() && volcengineEngine != null) {
+                    Log.w(TAG, "通义听悟 Key 未配置 → 降级到豆包 ASR")
+                    ensureInitializedOrThrow(context, volcengineEngine!!)
+                    volcengineEngine!!
                 } else {
                     throw NoEngineException(
                         "通义听悟密钥未配置。请在「API 配置」页面设置 AccessKey ID/Secret/AppKey。")
@@ -135,14 +93,10 @@ class EngineRouter(
                 if (prefs.hasVolcengineKeys() && volcengineEngine != null) {
                     ensureInitializedOrThrow(context, volcengineEngine!!)
                     volcengineEngine!!
-                } else if (prefs.autoFallback && prefs.hasFunAsrCloudUrl() && funAsrCloudEngine != null) {
-                    Log.w(TAG, "豆包 ASR Key 未配置 → 降级到 FunASR 云端")
-                    ensureInitializedOrThrow(context, funAsrCloudEngine!!)
-                    funAsrCloudEngine!!
-                } else if (prefs.autoFallback) {
-                    Log.w(TAG, "无可用云端引擎 → 降级到本地 FunASR")
-                    ensureInitializedOrThrow(context, funAsrEngine)
-                    funAsrEngine
+                } else if (prefs.autoFallback && prefs.hasTingwuKeys() && tingwuEngine != null) {
+                    Log.w(TAG, "豆包 ASR Key 未配置 → 降级到通义听悟")
+                    ensureInitializedOrThrow(context, tingwuEngine!!)
+                    tingwuEngine!!
                 } else {
                     throw NoEngineException(
                         "豆包 ASR 密钥未配置。请在「API 配置」页面设置 API Key 或 Access Token。")
@@ -156,10 +110,10 @@ class EngineRouter(
                 if (hasKeys) {
                     ensureInitializedOrThrow(context, engine)
                     engine
-                } else if (prefs.autoFallback) {
-                    Log.w(TAG, "${preferred.displayName} 密钥未配置 → 降级到本地 FunASR")
-                    ensureInitializedOrThrow(context, funAsrEngine)
-                    funAsrEngine
+                } else if (prefs.autoFallback && prefs.hasVolcengineKeys() && volcengineEngine != null) {
+                    Log.w(TAG, "${preferred.displayName} 密钥未配置 → 降级到豆包 ASR")
+                    ensureInitializedOrThrow(context, volcengineEngine!!)
+                    volcengineEngine!!
                 } else {
                     throw NoEngineException(
                         "${preferred.displayName} 密钥未配置。请在「API 配置」页面填写。")

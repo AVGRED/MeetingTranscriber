@@ -96,8 +96,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         when (mode) {
-            "realtime" -> frag.startOnlineMeeting()
-            "offline" -> frag.startOfflineMeeting()
+            "realtime", "offline" -> frag.startOnlineMeeting()
         }
     }
 
